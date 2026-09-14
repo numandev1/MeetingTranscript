@@ -1,0 +1,532 @@
+import type {
+    ChatMessage,
+    ContentScriptState,
+    ErrorObject,
+    ExtensionMessage,
+    ExtensionResponse,
+    MeetingSoftware,
+    Platform,
+    ResultLocal,
+    ResultSync,
+    TranscriptBlock,
+} from "@lib/types"
+import { LOGO_URL, LOG_ERROR_SCRIPT_URL, NOTIFICATION_PLATFORM_CONFIGS, mutationConfig } from "./common-config"
+import { SELECTORS_GOOGLE_MEET } from "./google-meet/config"
+import { SELECTORS_TEAMS } from "./teams/config"
+import { SELECTORS_ZOOM } from "./zoom/config"
+
+/** Keys of the content script state that can be flushed to chrome.storage.local. */
+export type StorableStateKey = "meetingSoftware" | "meetingTitle" | "meetingStartTimestamp" | "transcript" | "chatMessages"
+
+/**
+ * Platform specific handler invoked for every batch of captions mutations.
+ * Passed in by each platform's entry point so that this module does not have to
+ * import the platform modules that import it.
+ */
+export type TranscriptMutationCallback = (state: ContentScriptState, mutations: MutationRecord[]) => void
+
+/** State Factory: Returns a pristine, isolated meeting state block. */
+export function createContentScriptState(meetingSoftware: MeetingSoftware, platform: Platform): ContentScriptState {
+    return {
+        meetingSoftware: meetingSoftware,
+        platform: platform,
+        userName: "You",
+        transcript: [],
+        chatMessages: [],
+        stateTranscriptBlock: {
+            timestamp: "",
+            mutationTargetElement: null,
+            personName: "",
+            transcriptTextBuffer: "",
+
+        },
+        meetingStartTimestamp: new Date().toISOString(),
+        meetingTitle: document.title,
+        transcriptTargetNode: null,
+        transcriptObserver: null,
+        chatMessagesTargetNode: null,
+        chatMessagesObserver: null,
+        isTranscriptDomErrorCaptured: false,
+        isChatMessagesDomErrorCaptured: false,
+        hasMeetingStarted: false,
+        hasMeetingEnded: false,
+        extensionStatusJSON: {
+            status: 200,
+            message: "<strong>TranscripTonic is running</strong> <br /> Do not turn off captions"
+        }
+    }
+}
+
+/**
+ * Fetches extension status from GitHub and saves to chrome storage.
+ * Defaults to 200, if remote server is unavailable.
+ */
+export function checkExtensionStatus(state: ContentScriptState): Promise<string> {
+    return new Promise((resolve, reject) => {
+        // Set default value as 200
+        state.extensionStatusJSON = {
+            status: 200,
+            message: state.meetingSoftware ? NOTIFICATION_PLATFORM_CONFIGS[state.platform].notificationText : ""
+        }
+
+        // https://stackoverflow.com/a/42518434
+        fetch(
+            state.meetingSoftware ? NOTIFICATION_PLATFORM_CONFIGS[state.platform].statusUrl : "",
+            { cache: "no-store" }
+        )
+            .then((response) => response.json())
+            .then((result) => {
+                const minVersion = result.minVersion
+
+                // Disable extension if version is below the min version
+                if (!meetsMinVersion(chrome.runtime.getManifest().version, minVersion)) {
+                    state.extensionStatusJSON.status = 400
+                    state.extensionStatusJSON.message = `<strong>TranscripTonic is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/vivek-nexus/transcriptonic/wiki/Manually-update-TranscripTonic" target="_blank">these instructions</a>`
+                }
+                else {
+                    // Update status based on response
+                    state.extensionStatusJSON.status = result.status
+                    state.extensionStatusJSON.message = result.message
+                    state.extensionStatusJSON.showBetaMessage = (result.showBetaMessage === true)
+                }
+
+                console.log("Extension status fetched and saved")
+                resolve("Extension status fetched and saved")
+            })
+            .catch((err) => {
+                console.error(err)
+                reject("Could not fetch extension status")
+
+                logError(state, "008", err)
+            })
+    })
+}
+
+/** Overwrite state to chrome storage */
+export function overWriteChromeStorage(state: ContentScriptState, keys: StorableStateKey[], sendDownloadMessage: boolean): void {
+    const objectToSave: Partial<ResultLocal> = {}
+    if (keys.includes("meetingSoftware")) objectToSave.meetingSoftware = state.meetingSoftware
+    if (keys.includes("meetingTitle")) objectToSave.meetingTitle = state.meetingTitle
+    if (keys.includes("meetingStartTimestamp")) objectToSave.meetingStartTimestamp = state.meetingStartTimestamp
+    if (keys.includes("transcript")) objectToSave.transcript = state.transcript
+    if (keys.includes("chatMessages")) objectToSave.chatMessages = state.chatMessages
+
+    chrome.storage.local.set(objectToSave, function () {
+        if (sendDownloadMessage) {
+            const message: ExtensionMessage = { type: "meeting_ended" }
+            chrome.runtime.sendMessage(message, (responseUntyped) => {
+                const response = responseUntyped as ExtensionResponse
+                if ((!response.success)) {
+                    const parsedError = response.message as ErrorObject
+                    if (parsedError.errorCode === "010") {
+                        console.error(parsedError.errorMessage)
+                    }
+                }
+            })
+        }
+    })
+}
+
+/** Attempts to recover last meeting to the best possible extent. */
+export function recoverLastMeeting(): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const message: ExtensionMessage = {
+            type: "recover_last_meeting",
+        }
+        chrome.runtime.sendMessage(message, function (responseUntyped) {
+            const response = responseUntyped as ExtensionResponse
+            if (response.success) {
+                resolve("Last meeting recovered successfully or recovery not needed")
+            }
+            else {
+                reject(response.message)
+            }
+        })
+    })
+}
+
+/**
+ * Efficiently waits until the element of the specified selector and textContent appears
+ * in the DOM. Polls only on animation frame change.
+ */
+export async function waitForElement(selector: string, text?: string | RegExp, iframe: HTMLIFrameElement | null = null): Promise<Element | null> {
+    // If an iframe is provided, use its content document; otherwise, default to top-level document
+    const targetDoc = iframe ? (iframe.contentDocument as Document) : document
+
+    if (text) {
+        // loops for every animation frame change, until the required element is found
+        while (!Array.from(targetDoc.querySelectorAll(selector)).find(element => element.textContent === text)) {
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+        }
+    }
+    else {
+        // loops for every animation frame change, until the required element is found
+        while (!targetDoc.querySelector(selector)) {
+            await new Promise((resolve) => requestAnimationFrame(resolve))
+        }
+    }
+    return targetDoc.querySelector(selector)
+}
+
+/**
+ * Waits until an element matching the selector has the specified computed CSS property value.
+ * @param selector The selector to query (e.g., 'div[role="region"]')
+ * @param cssProp The camelCase or kebab-case CSS property (e.g., 'containerName')
+ * @param cssPropValue The expected value of the CSS property (e.g., 'captions-history')
+ */
+export async function waitForElementByStyle(selector: string, cssProp: string, cssPropValue: string): Promise<Element> {
+    while (true) {
+        const elements = Array.from(document.querySelectorAll(selector))
+        const matchedElement = elements.find(element => {
+            const computedStyle = window.getComputedStyle(element)
+            // Cast the string to a valid key type of CSSStyleDeclaration to satisfy the compiler
+            return computedStyle[cssProp as keyof CSSStyleDeclaration] === cssPropValue
+        })
+
+        if (matchedElement) {
+            return matchedElement
+        }
+
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+    }
+}
+
+/**
+ * Single, flat polling monitor that handles initial attachment and all re-attachments.
+ * @param transcriptMutationCallback platform specific mutation handler
+ */
+export function startTranscriptMonitor(state: ContentScriptState, transcriptMutationCallback: TranscriptMutationCallback): void {
+    state.transcriptTargetNode = null
+    let monitorInterval: number | undefined = undefined
+
+    // Call immediately
+    transcriptMonitor()
+    // Start monitoring
+    monitorInterval = setInterval(transcriptMonitor, 2000) as unknown as number
+
+    function transcriptMonitor() {
+        if (state.hasMeetingEnded) {
+            clearInterval(monitorInterval)
+            return
+        }
+
+        let activeNode: Element | null | undefined
+
+        switch (state.platform) {
+            case "google_meet":
+                activeNode = document.querySelector(SELECTORS_GOOGLE_MEET.TRANSCRIPT_REGION)
+                break
+            case "teams":
+                activeNode = document.querySelector(SELECTORS_TEAMS.CAPTIONS_REGION)
+                break
+            case "zoom": {
+                const iframeDOM = (document.querySelector(SELECTORS_ZOOM.IFRAME) as HTMLIFrameElement | null)?.contentDocument
+                activeNode = iframeDOM?.querySelector(SELECTORS_ZOOM.TRANSCRIPT_CONTAINER)
+                break
+            }
+            default:
+                break
+        }
+
+        if (!activeNode) {
+            return
+        }
+
+        // If the active node is new, replaced, or disconnected, re-attach the observer
+        if (!state.transcriptTargetNode || activeNode !== state.transcriptTargetNode || !state.transcriptTargetNode.isConnected) {
+            if (!state.transcriptTargetNode) {
+                console.log("Captions region detected. Attaching observer...")
+            }
+            else if (activeNode !== state.transcriptTargetNode) {
+                console.log("Captions region replaced. Re-attaching observer...")
+            }
+
+            // Flush any in-flight buffer to prevent losing text on transitions
+            pushBufferToTranscript(state)
+            state.stateTranscriptBlock.personName = ""
+            state.stateTranscriptBlock.transcriptTextBuffer = ""
+            state.stateTranscriptBlock.timestamp = ""
+
+            if (state.transcriptObserver) {
+                state.transcriptObserver.disconnect()
+            }
+
+            state.transcriptTargetNode = activeNode
+            state.transcriptObserver = new MutationObserver((mutations) => {
+                transcriptMutationCallback(state, mutations)
+            })
+            state.transcriptObserver.observe(activeNode, mutationConfig)
+
+            // If specified, hide the whole transcript node
+            chrome.storage.sync.get(["hideCaptions"], function (resultSyncUntyped) {
+                const resultSync = resultSyncUntyped as Partial<ResultSync>
+                if ((resultSync.hideCaptions === true) && (state.transcriptTargetNode)) {
+                    if (state.platform === "teams") {
+                        waitForElement(SELECTORS_TEAMS.CAPTIONS_REGION_WRAPPER).then((element) => {
+                            element?.setAttribute("style", `height:40px`)
+                        })
+                        waitForElement(SELECTORS_TEAMS.CAPTIONS_REGION).then((element) => {
+                            element?.setAttribute("style", `opacity:0`)
+                        })
+                    }
+                    else {
+                        state.transcriptTargetNode.setAttribute("style", `opacity:0; height:0px`)
+                    }
+                }
+            })
+        }
+    }
+}
+
+export function broadcastLiveBuffer(state: ContentScriptState): void {
+    const message: ExtensionMessage = {
+        type: "broadcast_live_buffer",
+        stateTranscriptBlock: {
+            mutationTargetElement: null,
+            personName: state.stateTranscriptBlock.personName,
+            timestamp: state.stateTranscriptBlock.timestamp,
+            transcriptTextBuffer: state.stateTranscriptBlock.transcriptTextBuffer
+        }
+    }
+    chrome.runtime.sendMessage(message, () => { })
+}
+
+export function pushBufferToTranscript(state: ContentScriptState): void {
+    if ((state.stateTranscriptBlock.personName !== "") && (state.stateTranscriptBlock.transcriptTextBuffer !== "")) {
+        state.transcript.push({
+            "personName": state.stateTranscriptBlock.personName === "You" ? state.userName : state.stateTranscriptBlock.personName,
+            "timestamp": state.stateTranscriptBlock.timestamp,
+            "transcriptText": state.stateTranscriptBlock.transcriptTextBuffer
+        })
+        overWriteChromeStorage(state, ["transcript"], false)
+    }
+}
+
+/** Waits and grabs meeting title from document title */
+export function updateMeetingTitle(state: ContentScriptState): void {
+    setTimeout(() => {
+        // NON CRITICAL DOM DEPENDENCY
+        state.meetingTitle = document.title
+        overWriteChromeStorage(state, ["meetingTitle"], false)
+    }, 5000)
+}
+
+export function pulseStatus(): void {
+    const statusActivityCSS = `position: fixed;
+    top: 0px;
+    width: 100%;
+    height: 4px;
+    z-index: 100;
+    transition: background-color 0.3s ease-in
+  `
+    let activityStatus = document.querySelector<HTMLDivElement>(`#transcriptonic-status`)
+    if (!activityStatus) {
+        const html = document.querySelector("html")
+        activityStatus = document.createElement("div")
+        activityStatus.setAttribute("id", "transcriptonic-status")
+        activityStatus.style.cssText = `background-color: #2A9ACA; ${statusActivityCSS}`
+        html?.appendChild(activityStatus)
+    }
+    else {
+        activityStatus.style.cssText = `background-color: #2A9ACA; ${statusActivityCSS}`
+    }
+
+    setTimeout(() => {
+        activityStatus.style.cssText = `background-color: transparent; ${statusActivityCSS}`
+    }, 3000)
+}
+
+export function renderFab(state: ContentScriptState): void {
+    const fabCss = `
+        position: fixed;
+        top: 50%;
+        bottom: 50%;
+        right: 8px;
+        height: 36px;
+        width: 36px;
+        border-radius: 36px;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #071f29;
+        box-shadow: 0px 0px 4px 0px #2A9ACA;
+        cursor: pointer;
+        border: none;
+        padding: 0;
+        overflow: visible;
+    `
+
+    const html = document.querySelector("html")
+    const fab = document.createElement("button")
+    fab.id = "transcriptonic-fab"
+    fab.ariaLabel = "TranscripTonic"
+    fab.title = "TranscripTonic"
+    fab.style.cssText = fabCss
+
+    fab.innerHTML = `
+        <div id="fab-main-content" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
+            <img id="fab-default-logo" src="${LOGO_URL}" alt="TranscripTonic" draggable="false" style="width: 20px; height: 20px; object-fit: contain;" />
+            <span id="fab-letter-mark" style="display: none; color: #ffffff; font-weight: bold; font-size: 16px; text-transform: uppercase; font-family: sans-serif;"></span>
+        </div>
+
+        <img id="fab-mini-badge" src="${LOGO_URL}" alt="Active Badge" draggable="false" style="
+            display: none;
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #071f29;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+            object-fit: contain;
+            pointer-events: none;
+        " />
+    `
+
+    html?.appendChild(fab)
+    makeVerticallyDraggable(fab)
+
+    fab.addEventListener("click", () => {
+        const message: ExtensionMessage = { type: "open_side_panel" }
+        chrome.runtime.sendMessage(message, () => { })
+    })
+
+    // Initial storage query on load
+    chrome.storage.local.get(["transcript"], (resultUntyped) => {
+        const result = resultUntyped as Partial<ResultLocal>
+        state.transcript = result.transcript ?? state.transcript
+        updateFabState(state)
+    })
+}
+
+function makeVerticallyDraggable(fab: HTMLButtonElement): void {
+    let isDragging = false
+    let startY = 0
+    let initialTop = 0
+    let hasMoved = false
+
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+        isDragging = true
+        hasMoved = false
+
+        const clientY = "touches" in e ? e.touches[0].clientY : e.clientY
+        startY = clientY
+        initialTop = fab.getBoundingClientRect().top
+
+        // Attach movement listeners to document so fast drags aren't lost
+        document.addEventListener("mousemove", onPointerMove)
+        document.addEventListener("mouseup", onPointerUp)
+        document.addEventListener("touchmove", onPointerMove, { passive: false })
+        document.addEventListener("touchend", onPointerUp)
+    }
+
+    const onPointerMove = (e: MouseEvent | TouchEvent) => {
+        if (!isDragging) return
+
+        const clientY = "touches" in e ? e.touches[0].clientY : e.clientY
+        const deltaY = clientY - startY
+
+        // Threshold (3px) to differentiate click from drag
+        if (Math.abs(deltaY) > 3) {
+            hasMoved = true
+            if (e.cancelable) e.preventDefault() // Prevent scrolling on touch
+        }
+
+        let newTop = initialTop + deltaY
+
+        // Bound vertical position inside the visible viewport
+        const maxTop = window.innerHeight - fab.offsetHeight
+        newTop = Math.max(0, Math.min(newTop, maxTop))
+
+        fab.style.top = `${newTop}px`
+    }
+
+    const onPointerUp = () => {
+        isDragging = false
+        document.removeEventListener("mousemove", onPointerMove)
+        document.removeEventListener("mouseup", onPointerUp)
+        document.removeEventListener("touchmove", onPointerMove)
+        document.removeEventListener("touchend", onPointerUp)
+    }
+
+    fab.addEventListener("mousedown", onPointerDown)
+    fab.addEventListener("touchstart", onPointerDown, { passive: true })
+
+    // Block the 'click' event if the user dragged the button
+    fab.addEventListener("click", (e) => {
+        if (hasMoved) {
+            e.stopImmediatePropagation()
+            e.preventDefault()
+            hasMoved = false
+        }
+    }, true) // Capture phase ensures it runs before the side-panel click handler
+}
+
+/** Updates the FAB visual state based on the current transcript data. */
+export function updateFabState(state: ContentScriptState): void {
+    const fab = document.querySelector("#transcriptonic-fab")
+
+    const defaultLogo = fab?.querySelector<HTMLElement>("#fab-default-logo")
+    const letterMark = fab?.querySelector<HTMLElement>("#fab-letter-mark")
+    const miniBadge = fab?.querySelector<HTMLElement>("#fab-mini-badge")
+
+    if (state.transcript && state.transcript.length > 0) {
+        const currentSpeaker = state.stateTranscriptBlock?.personName
+
+        if (currentSpeaker && currentSpeaker.trim() !== "") {
+            const initial = currentSpeaker.trim().charAt(0)
+
+            // Active Speaker State: Show letter mark + corner badge, hide central logo
+            if (defaultLogo) defaultLogo.style.display = "none"
+            if (letterMark) {
+                letterMark.textContent = initial
+                letterMark.style.display = "inline"
+            }
+            if (miniBadge) miniBadge.style.display = "block"
+            return
+        }
+    }
+
+    // Default State: Fallback to central logo, hide mark + badge
+    if (defaultLogo) defaultLogo.style.display = "block"
+    if (letterMark) letterMark.style.display = "none"
+    if (miniBadge) miniBadge.style.display = "none"
+}
+
+export function unmountFab(): void {
+    const fab = document.querySelector("#transcriptonic-fab")
+    if (fab) {
+        fab.remove()
+    }
+}
+
+/** Logs active transcript to console */
+export function logTranscriptToConsole(state: ContentScriptState): void {
+    if (state.stateTranscriptBlock.transcriptTextBuffer.length > 125) {
+        console.log(state.stateTranscriptBlock.transcriptTextBuffer.slice(0, 50) + "   ...   " + state.stateTranscriptBlock.transcriptTextBuffer.slice(-50))
+    }
+    else {
+        console.log(state.stateTranscriptBlock.transcriptTextBuffer)
+    }
+}
+
+/** Logs anonymous errors to a Google sheet for swift debugging */
+export function logError(state: ContentScriptState, code: string, err: unknown): void {
+    fetch(`${LOG_ERROR_SCRIPT_URL}?version=${chrome.runtime.getManifest().version}&code=${code}&error=${encodeURIComponent(String(err))}&meetingSoftware=${state.meetingSoftware}`, { mode: "no-cors" })
+}
+
+/** Checks if the installed extension version meets the minimum required version. */
+export function meetsMinVersion(oldVer: string, newVer: string): boolean {
+    const oldParts = oldVer.split('.')
+    const newParts = newVer.split('.')
+    for (let i = 0; i < newParts.length; i++) {
+        const a = ~~newParts[i] // parse int
+        const b = ~~oldParts[i] // parse int
+        if (a > b) return false
+        if (a < b) return true
+    }
+    return true
+}
+

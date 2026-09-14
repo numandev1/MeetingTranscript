@@ -70,6 +70,30 @@ When this happens, it might be possible to recover the transcript, but recovery 
 <br />
 <br />
 
+# Development
+
+TranscripTonic is written in TypeScript and bundled with webpack. The loadable extension is the generated `build/` directory, not `src/`.
+
+```bash
+npm install
+npm run build      # development build into build/
+npm start          # same, in watch mode
+npm run check      # type check (tsc --noEmit)
+npm run zip        # production build + zip/ artifact for the Chrome Web Store
+```
+
+Then load `build/` via `chrome://extensions` → Developer mode → **Load unpacked**.
+
+Source layout:
+
+- `src/background-script/` — MV3 service worker: meeting post-processing, downloads, webhooks, content-script registration
+- `src/content-scripts/` — shared caption-capture machinery plus one directory per platform (`google-meet`, `teams`, `zoom`); each holds `config.ts` (DOM selectors), `utils.ts` and `index.ts`
+- `src/pages/` — webpack entry points and the HTML for the popup, meetings page and side panel
+- `src/lib/types.ts` — shared types and the error-code reference
+
+<br />
+<br />
+
 # Privacy policy
 TranscripTonic Chrome extension does not collect any information from users in any manner, except anonymous errors and transcript download timestamp. All processing/transcript storage happens within the user's Chrome browser and does not leave the device, unless you configure a webhook and choose to post data to your webhook URL.
 
