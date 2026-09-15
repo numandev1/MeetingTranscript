@@ -18,10 +18,20 @@ function getLocalDateStamp(isoTimestamp: string): string {
     return `${date.getFullYear()}-${month}-${day}`
 }
 
+/** Local 24-hour time as HHMM, to order several meetings on the same day. */
+function getLocalTimeStamp(isoTimestamp: string): string {
+    const date = new Date(isoTimestamp)
+    return `${`${date.getHours()}`.padStart(2, "0")}${`${date.getMinutes()}`.padStart(2, "0")}`
+}
+
 /**
- * Note name for a meeting: the meeting title with the date appended, e.g.
- * "Standup 2026-09-14". Sorting stays readable and same-titled recurring meetings
- * do not collide.
+ * Note name for a meeting, e.g. "2026-09-14 0930 Standup".
+ *
+ * The timestamp leads because Obsidian's file explorer sorts alphabetically by file
+ * name. With the title first, a new meeting lands wherever its title happens to fall
+ * alphabetically; with the date first, the folder is always in chronological order.
+ * The time is included so several meetings on one day still order correctly, and
+ * because it keeps recurring meetings of the same name from colliding.
  */
 export function getObsidianNoteName(meeting: Meeting): string {
     const rawTitle = meeting.meetingTitle || meeting.title || "Meeting"
@@ -33,7 +43,8 @@ export function getObsidianNoteName(meeting: Meeting): string {
         .replace(/\.+$/, "")
         .trim()
 
-    return `${title || "Meeting"} ${getLocalDateStamp(meeting.meetingStartTimestamp)}`
+    const startedAt = meeting.meetingStartTimestamp
+    return `${getLocalDateStamp(startedAt)} ${getLocalTimeStamp(startedAt)} ${title || "Meeting"}`
 }
 
 /** Escapes a value for a single-quoted YAML scalar. */

@@ -121,6 +121,8 @@ The transcript dialog's Obsidian and Download actions both **follow whichever no
 
 `syncAllMeetingsToObsidian()` writes every stored meeting, and any summaries, in one action. It runs **sequentially**: the target is a plugin inside the user's editor, and concurrent writes gain nothing while making a partial failure impossible to report accurately. It also **stops early on error 019** (vault unreachable), since that will fail for every remaining meeting too.
 
+Note names lead with the timestamp (`2026-09-14 0930 Standup`) because Obsidian's file explorer sorts alphabetically by file name. With the title first, a new meeting lands wherever its title falls alphabetically instead of at the end of the folder. The time is part of the name so several meetings in one day still order correctly.
+
 Re-running is safe by design — notes are addressed by title and date, so a second run replaces the same notes rather than duplicating them, which makes this usable as a repair action.
 
 ### Moving a setup between machines
