@@ -93,7 +93,13 @@ Source layout:
 
 # Privacy
 
-Transcripts are captured and stored entirely in your browser. Nothing is sent anywhere unless you configure a webhook or Obsidian, in which case it goes only to the address you entered. There is no analytics, no error reporting and no remote configuration.
+Transcripts are captured and stored in your browser. There is no analytics, no error reporting and no remote configuration — the extension contacts nothing on its own.
+
+Three optional features send data out, each only when you use them:
+
+- **Webhook** — the meeting is posted to the URL you entered, and nowhere else.
+- **Obsidian** — notes are written to the Local REST API address you entered, normally your own machine.
+- **Summarise** — the transcript is sent to **ChatGPT**, in the browser tab you are signed into, and is therefore subject to OpenAI's terms and data handling. Don't use it for meetings you cannot share with a third party.
 
 <br />
 

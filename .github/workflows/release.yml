@@ -39,6 +39,9 @@ jobs:
         # A build that does not type check must never reach a release
         run: npm run check
 
+      - name: Test
+        run: npm test
+
       - name: Build production zip
         run: npm run zip
 

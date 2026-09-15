@@ -73,33 +73,6 @@ export function showNotificationGoogleMeet(extensionStatusJSON: ExtensionStatusJ
         html.append(obj)
 }
 
-/** Grabs updated meeting title, if available */
-export function updateMeetingTitleGoogleMeet(state: ContentScriptState): void {
-    waitForElement(SELECTORS_GOOGLE_MEET.MEETING_TITLE).then((element) => {
-        const meetingTitleElement = element as HTMLDivElement | null
-        if (!meetingTitleElement) {
-            return
-        }
-        meetingTitleElement.setAttribute("contenteditable", "true")
-        meetingTitleElement.title = "Edit meeting title for MeetingTranscript"
-        meetingTitleElement.style.cssText = `text-decoration: underline white; text-underline-offset: 4px;`
-
-        meetingTitleElement.addEventListener("input", handleMeetingTitleElementChange)
-
-        // Pick up meeting name after a delay, since Google meet updates meeting name after a delay
-        setTimeout(() => {
-            handleMeetingTitleElementChange()
-            if (location.pathname === `/${meetingTitleElement.innerText}`) {
-                showNotificationGoogleMeet({ status: 200, message: "<b>Give this meeting a title?</b><br/>Edit the underlined text in the bottom left corner" })
-            }
-        }, 7000)
-
-        function handleMeetingTitleElementChange() {
-            state.meetingTitle = (meetingTitleElement as HTMLDivElement).innerText
-            overWriteChromeStorage(state, ["meetingTitle"], false)
-        }
-    })
-}
 
 /**
  * Attempt to get username before meeting starts. Abort interval if valid username is
@@ -127,15 +100,13 @@ export function captureUserName(state: ContentScriptState): void {
     })
 }
 
-/** Pushes object to array only if it doesn't already exist. */
-export function pushUniqueChatBlock(state: ContentScriptState, chatBlock: ChatMessage): void {
-    const isExisting = state.chatMessages.some(item =>
-        (item.personName === chatBlock.personName) &&
-        (item.chatMessageText === chatBlock.chatMessageText)
-    )
-    if (!isExisting) {
-        console.log(chatBlock)
-        state.chatMessages.push(chatBlock)
-        overWriteChromeStorage(state, ["chatMessages"], false)
-    }
+/**
+ * Stores a chat message.
+ *
+ * De-duplication happens on data-message-id in the caller, so two identical messages
+ * from the same person are both kept — collapsing them lost real content.
+ */
+export function pushChatBlock(state: ContentScriptState, chatBlock: ChatMessage): void {
+    state.chatMessages.push(chatBlock)
+    overWriteChromeStorage(state, ["chatMessages"], false)
 }

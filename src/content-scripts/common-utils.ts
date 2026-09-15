@@ -7,6 +7,7 @@ import type {
     MeetingSoftware,
     Platform,
     ResultLocal,
+    RecentError,
     ResultSync,
     TranscriptBlock,
 } from "@lib/types"
@@ -14,6 +15,13 @@ import { LOGO_URL, NOTIFICATION_PLATFORM_CONFIGS, mutationConfig } from "./commo
 import { SELECTORS_GOOGLE_MEET } from "./google-meet/config"
 import { SELECTORS_TEAMS } from "./teams/config"
 import { SELECTORS_ZOOM } from "./zoom/config"
+
+/**
+ * How long any single DOM wait may run before it is treated as a breakage.
+ * Generous, because a user can sit in a meeting lobby for minutes before the controls
+ * render, but finite so a vendor change surfaces as an error rather than silence.
+ */
+export const DEFAULT_ELEMENT_TIMEOUT_MS = 5 * 60 * 1000
 
 /** Keys of the content script state that can be flushed to chrome.storage.local. */
 export type StorableStateKey = "meetingSoftware" | "meetingTitle" | "meetingStartTimestamp" | "transcript" | "chatMessages"
@@ -140,26 +148,47 @@ export function recoverLastMeeting(): Promise<string> {
 }
 
 /**
- * Efficiently waits until the element of the specified selector and textContent appears
- * in the DOM. Polls only on animation frame change.
+ * Waits for an element, giving up after a deadline.
+ *
+ * The timeout is the point: without one, a single renamed class or ligature leaves the
+ * caller awaiting forever, its .catch() never runs, and the extension reports nothing at
+ * all. Every error code this file can raise depends on this rejecting.
+ *
+ * @param text when given, matches an element whose exact trimmed text equals it, or any
+ *             of several alternatives — platforms rename these between states
+ * @throws when the element does not appear before timeoutMs
  */
-export async function waitForElement(selector: string, text?: string | RegExp, iframe: HTMLIFrameElement | null = null): Promise<Element | null> {
-    // If an iframe is provided, use its content document; otherwise, default to top-level document
-    const targetDoc = iframe ? (iframe.contentDocument as Document) : document
+export async function waitForElement(
+    selector: string,
+    text?: string | string[],
+    iframe: HTMLIFrameElement | null = null,
+    timeoutMs: number = DEFAULT_ELEMENT_TIMEOUT_MS
+): Promise<Element> {
+    const wanted = text === undefined ? undefined : (Array.isArray(text) ? text : [text])
+    const startedAt = Date.now()
 
-    if (text) {
-        // loops for every animation frame change, until the required element is found
-        while (!Array.from(targetDoc.querySelectorAll(selector)).find(element => element.textContent === text)) {
-            await new Promise((resolve) => requestAnimationFrame(resolve))
+    while (true) {
+        // Resolved every pass: an iframe's document is replaced on navigation
+        const targetDoc = iframe ? iframe.contentDocument : document
+
+        if (targetDoc) {
+            if (wanted) {
+                const match = Array.from(targetDoc.querySelectorAll(selector))
+                    .find(element => wanted.includes((element.textContent ?? "").trim()))
+                if (match) return match
+            }
+            else {
+                const match = targetDoc.querySelector(selector)
+                if (match) return match
+            }
         }
-    }
-    else {
-        // loops for every animation frame change, until the required element is found
-        while (!targetDoc.querySelector(selector)) {
-            await new Promise((resolve) => requestAnimationFrame(resolve))
+
+        if (Date.now() - startedAt > timeoutMs) {
+            throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s waiting for ${selector}${wanted ? ` ("${wanted.join('" or "')}")` : ""}`)
         }
+
+        await new Promise((resolve) => requestAnimationFrame(resolve))
     }
-    return targetDoc.querySelector(selector)
 }
 
 /**
@@ -246,6 +275,9 @@ export function startTranscriptMonitor(state: ContentScriptState, transcriptMuta
             }
 
             state.transcriptTargetNode = activeNode
+            // Proof that capture actually started, so a short transcript can be told
+            // apart from a transcript that never began
+            chrome.storage.local.set({ captionsSeen: true })
             state.transcriptObserver = new MutationObserver((mutations) => {
                 transcriptMutationCallback(state, mutations)
             })
@@ -310,7 +342,7 @@ function persistLiveBuffer(state: ContentScriptState): void {
 /** Drops the persisted in-flight buffer, once it is safely part of the transcript. */
 export function clearLiveBuffer(): void {
     lastLiveBufferPersistedAt = 0
-    chrome.storage.local.set({ liveTranscriptBlock: null })
+    chrome.storage.local.set({ liveTranscriptBlock: null, captionsSeen: false })
 }
 
 export function broadcastLiveBuffer(state: ContentScriptState): void {
@@ -340,6 +372,7 @@ export function pushBufferToTranscript(state: ContentScriptState): void {
     }
 }
 
+
 /** Waits and grabs meeting title from document title */
 export function updateMeetingTitle(state: ContentScriptState): void {
     setTimeout(() => {
@@ -347,31 +380,6 @@ export function updateMeetingTitle(state: ContentScriptState): void {
         state.meetingTitle = document.title
         overWriteChromeStorage(state, ["meetingTitle"], false)
     }, 5000)
-}
-
-export function pulseStatus(): void {
-    const statusActivityCSS = `position: fixed;
-    top: 0px;
-    width: 100%;
-    height: 4px;
-    z-index: 100;
-    transition: background-color 0.3s ease-in
-  `
-    let activityStatus = document.querySelector<HTMLDivElement>(`#meetingtranscript-status`)
-    if (!activityStatus) {
-        const html = document.querySelector("html")
-        activityStatus = document.createElement("div")
-        activityStatus.setAttribute("id", "meetingtranscript-status")
-        activityStatus.style.cssText = `background-color: #2A9ACA; ${statusActivityCSS}`
-        html?.appendChild(activityStatus)
-    }
-    else {
-        activityStatus.style.cssText = `background-color: #2A9ACA; ${statusActivityCSS}`
-    }
-
-    setTimeout(() => {
-        activityStatus.style.cssText = `background-color: transparent; ${statusActivityCSS}`
-    }, 3000)
 }
 
 export function renderFab(state: ContentScriptState): void {
@@ -540,25 +548,32 @@ export function unmountFab(): void {
     }
 }
 
-/** Logs active transcript to console */
-export function logTranscriptToConsole(state: ContentScriptState): void {
-    if (state.stateTranscriptBlock.transcriptTextBuffer.length > 125) {
-        console.log(state.stateTranscriptBlock.transcriptTextBuffer.slice(0, 50) + "   ...   " + state.stateTranscriptBlock.transcriptTextBuffer.slice(-50))
-    }
-    else {
-        console.log(state.stateTranscriptBlock.transcriptTextBuffer)
-    }
-}
+
+/** How many recent errors to keep. Enough to see a pattern, small enough to stay cheap. */
+const MAX_RECENT_ERRORS = 20
 
 /**
- * Records a DOM breakage for debugging.
+ * Records a capture failure locally and surfaces it on the meetings page.
  *
- * Previously posted to the upstream project's Google Apps Script endpoint, which sent
- * this fork's error reports to someone else. Kept as a local console report so the error
- * codes in lib/types.ts still mean something when a user sends a console log.
+ * Replaces the upstream project's remote error reporting, which sent this fork's
+ * failures to a third party. Kept on the device so a user whose transcript broke has
+ * something concrete to look at, without anything leaving the machine.
  */
 export function logError(state: ContentScriptState, code: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err)
     console.error(`[MeetingTranscript] error ${code} on ${state.meetingSoftware || "unknown platform"}:`, err)
+
+    chrome.storage.local.get(["recentErrors"], function (resultUntyped) {
+        const result = resultUntyped as Partial<ResultLocal>
+        const entry: RecentError = {
+            at: new Date().toISOString(),
+            code: code,
+            meetingSoftware: state.meetingSoftware,
+            message: message.slice(0, 300)
+        }
+        const recentErrors = [...(result.recentErrors ?? []), entry].slice(-MAX_RECENT_ERRORS)
+        chrome.storage.local.set({ recentErrors })
+    })
 }
 
 /** Checks if the installed extension version meets the minimum required version. */

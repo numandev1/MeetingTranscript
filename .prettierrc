@@ -1,0 +1,10 @@
+{
+  "semi": false,
+  "singleQuote": false,
+  "printWidth": 110,
+  "tabWidth": 4,
+  "overrides": [
+    { "files": "*.mjs", "options": { "tabWidth": 2 } },
+    { "files": "*.html", "options": { "tabWidth": 4 } }
+  ]
+}

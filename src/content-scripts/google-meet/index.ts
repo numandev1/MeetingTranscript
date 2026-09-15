@@ -18,7 +18,7 @@ import {
     waitForElement,
 } from "../common-utils"
 import { SELECTORS_GOOGLE_MEET } from "./config"
-import { captureUserName, pushUniqueChatBlock, selectControlButton, selectElements, showNotificationGoogleMeet } from "./utils"
+import { captureUserName, pushChatBlock, selectControlButton, selectElements, showNotificationGoogleMeet } from "./utils"
 
 export function initGoogleMeet(): void {
     // Attempt to recover last meeting, if any. Abort if it takes more than 15 seconds to prevent current meeting getting messed up.
@@ -82,19 +82,26 @@ function googleMeetRoutines(state: ContentScriptState): void {
 
         // REGISTER TRANSCRIPT LISTENER
         // Wait for captions icon to be visible. When user is waiting in meeting lobbing for someone to let them in, the call end icon is visible, but the captions icon is still not visible.
-        waitForElement(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS)
-            .then(() => {
-                // CRITICAL DOM DEPENDENCY
-                const captionsButton = selectControlButton(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS)
+        waitForElement(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS,
+            [SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS_OFF, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS_ON])
+            .then((captionsIcon) => {
+                // Which ligature matched tells us the current state. Clicking when
+                // captions are already on would switch them off, losing the transcript.
+                const captionsAlreadyOn =
+                    (captionsIcon.textContent ?? "").trim() === SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS_ON
 
-                // Click captions icon for non manual operation modes. Async operation.
                 chrome.storage.sync.get(["operationMode"], function (resultSyncUntyped) {
                     const resultSync = resultSyncUntyped as Partial<ResultSync>
                     if (resultSync.operationMode === "manual") {
-                        console.log("Manual mode selected, leaving transcript off")
+                        console.log("Manual mode selected, leaving captions as they are")
+                    }
+                    else if (captionsAlreadyOn) {
+                        console.log("Captions already on, nothing to switch")
                     }
                     else {
-                        captionsButton?.click()
+                        // CRITICAL DOM DEPENDENCY
+                        selectControlButton(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS,
+                            SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS_OFF)?.click()
                     }
                 })
 
@@ -334,7 +341,7 @@ export function captureChatMessages(state: ContentScriptState): void {
                 }
 
                 state.capturedChatMessageIds.push(messageId)
-                pushUniqueChatBlock(state, {
+                pushChatBlock(state, {
                     personName: personName,
                     timestamp: new Date().toISOString(),
                     chatMessageText: chatMessageText

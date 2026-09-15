@@ -1,4 +1,6 @@
 import type { ErrorObject, Meeting, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
+import { DEFAULT_MEETINGS_TO_KEEP } from "@lib/paths"
+import { trimMeetings } from "@lib/retention"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
 import { postTranscriptToObsidian } from "./obsidian"
 
@@ -105,6 +107,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
             "chatMessages",
             "liveTranscriptBlock",
             "accountEmail",
+            "captionsSeen",
         ], function (resultUntyped) {
             const result = resultUntyped as Partial<ResultLocal>
 
@@ -117,6 +120,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                     const newMeetingEntry: Meeting = {
                         meetingSoftware: result.meetingSoftware ? result.meetingSoftware : "",
                         accountEmail: result.accountEmail,
+                        captionsSeen: result.captionsSeen === true,
                         meetingTitle: result.meetingTitle,
                         meetingStartTimestamp: result.meetingStartTimestamp,
                         meetingEndTimestamp: new Date().toISOString(),
@@ -129,19 +133,25 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                     // Get existing recent meetings and add the new meeting
                     chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
                         const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+                        chrome.storage.sync.get(["meetingsToKeep"], function (resultSyncUntyped) {
+                        const resultSync = resultSyncUntyped as Partial<ResultSync>
                         let meetings = resultLocal.meetings || []
                         meetings.push(newMeetingEntry)
 
-                        // Keep only last 10 transcripts
-                        if (meetings.length > 10) {
-                            meetings = meetings.slice(-10)
-                        }
+                        // Trim to the configured limit. trimMeetings has no access to the
+                        // vault, downloads or the webhook, so this can only ever drop the
+                        // extension's own copy.
+                        const keep = typeof resultSync.meetingsToKeep === "number"
+                            ? resultSync.meetingsToKeep
+                            : DEFAULT_MEETINGS_TO_KEEP
+                        meetings = trimMeetings(meetings, keep)
 
                         // Save updated recent transcripts, and drop the in-flight buffer
                         // now that it is part of a saved meeting
                         chrome.storage.local.set({ meetings: meetings, liveTranscriptBlock: null }, function () {
                             console.log("Last meeting picked up")
                             resolve("Last meeting picked up")
+                        })
                         })
                     })
                 }

@@ -1,19 +1,5 @@
 import type { ChatMessage, ExtensionMessage, Platform, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
-import { ALARM_NAME, INTERVAL_IN_MINUTES, TIMEFORMAT } from "./config"
-import { getPermissionStatus } from "./platforms"
-
-export function checkAndCreateAlarm(): void {
-    chrome.alarms.get(ALARM_NAME, (alarm) => {
-        if (!alarm) {
-            chrome.alarms.create(ALARM_NAME, {
-                periodInMinutes: INTERVAL_IN_MINUTES
-            })
-            console.log(`Alarm "${ALARM_NAME}" created successfully.`)
-        } else {
-            console.log(`Alarm "${ALARM_NAME}" already exists. Next scheduled run:`, new Date(alarm.scheduledTime))
-        }
-    })
-}
+import { TIMEFORMAT } from "./config"
 
 /** Format transcript entries into string */
 export function getTranscriptString(transcript: TranscriptBlock[]): string {
@@ -98,50 +84,6 @@ export function openSidePanel(): Promise<string> {
                     console.error("Failed to open side panel:", error)
                     reject("Failed to open side panel")
                 })
-        })
-    })
-}
-
-export function checkPermissionsAndOpenMeetingsPage(): void {
-    console.log("Check permissions")
-    chrome.storage.sync.get(["wantGoogleMeet", "wantTeams", "wantZoom"], function (resultSyncUntyped) {
-        const resultSync = resultSyncUntyped as Partial<ResultSync>
-
-        const wantedPlatforms: Platform[] = []
-        //  Consider enabled if user has not explicitly opted out
-        if (resultSync.wantGoogleMeet) {
-            wantedPlatforms.push("google_meet")
-        }
-        if (resultSync.wantTeams) {
-            wantedPlatforms.push("teams")
-        }
-        if (resultSync.wantZoom) {
-            wantedPlatforms.push("zoom")
-        }
-
-        const message: ExtensionMessage = {
-            type: "get_platform_permission_status",
-            platform: wantedPlatforms
-        }
-        void message
-
-        getPermissionStatus(wantedPlatforms).then((result) => {
-            console.log(result)
-
-            const permissionMissingPlatforms: Platform[] = []
-
-            for (let i = 0; i < wantedPlatforms.length; i++) {
-                if (Array.isArray(result) && result[i] === "Disabled") {
-                    permissionMissingPlatforms.push(wantedPlatforms[i])
-                }
-            }
-
-            if (permissionMissingPlatforms.length > 0) {
-                console.log(permissionMissingPlatforms)
-                chrome.tabs.create({
-                    url: chrome.runtime.getURL("meetings.html")
-                })
-            }
         })
     })
 }

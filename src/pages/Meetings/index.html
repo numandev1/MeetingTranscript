@@ -325,6 +325,7 @@
 <body>
 
 
+    <a href="#meetings-table-container" class="skip-link">Skip to meetings</a>
     <div class="page">
         <dialog id="permission-dialog" closedby="any">
             <h3 style="margin-bottom: var(--space-2);">A few permissions are missing</h3>
@@ -362,13 +363,27 @@
                     <p class="sub-text">The last 10 meetings stay on this device. Older ones are removed automatically.
                     </p>
                 </div>
-                <div style="display: flex; gap: var(--space-2); flex-shrink: 0;">
+                <div style="display: flex; gap: var(--space-2); flex-shrink: 0; align-items: center;">
+                    <label for="meetings-filter" class="visually-hidden">Filter meetings</label>
+                    <input type="search" id="meetings-filter" placeholder="Filter by title or date"
+                        style="width: 15rem;">
                     <button id="import-transcript" class="btn-secondary">Import transcript file</button>
                     <input type="file" id="import-transcript-file" accept="text/plain,.txt" multiple hidden>
                     <button id="recover-last-meeting" class="btn-secondary">Recover last meeting</button>
                 </div>
             </div>
             <p id="import-transcript-result" class="sub-text" style="margin-bottom: var(--space-3);"></p>
+            <p id="meetings-filter-empty" class="sub-text" style="margin-bottom: var(--space-3);" hidden>No meetings
+                match that filter.</p>
+
+            <details id="recent-errors" style="margin-bottom: var(--space-4);" hidden>
+                <summary><span id="recent-errors-count"></span></summary>
+                <div class="code-block" style="margin-top: var(--space-3);">
+                    <pre id="recent-errors-list"></pre>
+                </div>
+                <p class="sub-text" style="margin-top: var(--space-2);">Kept on this device only. Include these when
+                    reporting a problem.</p>
+            </details>
             <div id="meetings-table-container">
                 <table>
                     <thead>
@@ -397,6 +412,51 @@
                 bridges the gap.</p>
 
             <div class="grid-container">
+                <div class="card">
+                    <div class="webhook-header">
+                        <p class="card-heading">Summary prompt</p>
+                    </div>
+
+                    <p class="sub-text" style="margin-bottom: var(--space-4);">
+                        Sent to ChatGPT with the transcript appended. Change it to alter the sections, the tone, or the
+                        language of the summary &mdash; asking for the summary in the meeting's own language works.
+                    </p>
+
+                    <form id="summary-prompt-form" class="form-field">
+                        <label for="summary-prompt">Instructions</label>
+                        <textarea id="summary-prompt" rows="8"
+                            style="width:100%; font-family: var(--font-mono); font-size: var(--text-sm); resize: vertical;"></textarea>
+                        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3);">
+                            <button id="save-summary-prompt">Save</button>
+                            <button id="reset-summary-prompt" type="button" class="btn-secondary">Reset to default</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="webhook-header">
+                        <p class="card-heading">Meeting history</p>
+                    </div>
+
+                    <form id="meetings-to-keep-form" class="form-field">
+                        <label for="meetings-to-keep">Meetings to keep on this device</label>
+                        <div class="input-group">
+                            <input type="number" id="meetings-to-keep" min="0" max="500" step="1">
+                            <button id="save-meetings-to-keep">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: var(--space-3);">
+                            When a new meeting is saved, older ones beyond this number drop off the list below. Set it
+                            to <b>0</b> to keep every meeting.
+                        </p>
+                        <p class="sub-text" style="margin-top: var(--space-2);">
+                            <b>This only clears the extension's own copy.</b> Notes already written to Obsidian, text
+                            files already downloaded and anything already sent to your webhook stay exactly where they
+                            are &mdash; nothing this extension does removes them. Delete those in Obsidian or Finder if
+                            you want them gone.
+                        </p>
+                    </form>
+                </div>
+
                 <div class="card">
                     <div class="webhook-header">
                         <p class="card-heading">Move settings to another computer</p>
@@ -624,8 +684,9 @@
                             <button id="save-obsidian-api-key">Save</button>
                         </div>
                         <p class="sub-text" style="margin-top: 0.75rem;">
-                            Copy it from Obsidian &rarr; Settings &rarr; Local REST API. Stored on this device only, and
-                            never synced to your Google account.
+                            Copy it from Obsidian &rarr; Settings &rarr; Local REST API. Stored on this device only and
+                            never synced &mdash; but like any browser data it is readable by anything with access to
+                            this Chrome profile.
                         </p>
                     </form>
 
@@ -679,8 +740,9 @@
                         </div>
                         <p id="obsidian-test-result" class="sub-text" style="margin-top: var(--space-3);"></p>
                         <p class="sub-text" style="margin-top: var(--space-2);">
-                            Writes every stored meeting, and any summaries, into your vault. Notes are addressed by
-                            title and date, so running it again updates the same notes rather than duplicating them.
+                            Writes every stored meeting, and any summaries, into your vault. Notes already there are
+                            left alone, so anything you edited in Obsidian &mdash; ticked action items, added context
+                            &mdash; is safe. To replace one deliberately, use the Obsidian button on that meeting.
                         </p>
                     </div>
                 </div>

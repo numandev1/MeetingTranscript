@@ -37,9 +37,28 @@ chrome.storage.local.get(["meetingTitle", "transcript"], (resultUntyped) => {
         }
     }
 
-    if (result.transcript) {
+    if (result.transcript && result.transcript.length > 0) {
         updateTranscriptDOM(result.transcript)
+        return
     }
+
+    // Nothing live: show the most recent meeting instead of an empty panel, so this is
+    // still useful for re-reading the last call without leaving the meeting.
+    chrome.storage.local.get(["meetings"], (storedUntyped) => {
+        const stored = storedUntyped as Partial<ResultLocal>
+        const last = stored.meetings?.[stored.meetings.length - 1]
+        if (!last || last.transcript.length === 0) return
+
+        if (meetingTitle) {
+            meetingTitle.innerText = last.meetingTitle || last.title || "Last meeting"
+        }
+        const indicator = document.querySelector<HTMLElement>(".live-indicator span:last-child")
+        if (indicator) indicator.textContent = "Showing your last meeting"
+        const dot = document.querySelector<HTMLElement>(".live-dot")
+        if (dot) dot.style.background = "var(--ink-subtle)"
+
+        updateTranscriptDOM(last.transcript)
+    })
 })
 
 // Update on change

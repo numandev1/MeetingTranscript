@@ -1,7 +1,9 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Meeting, Platform, ResultLocal, ResultSync } from "@lib/types"
-import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER, getFolderPrefix } from "@lib/paths"
+import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_MEETINGS_TO_KEEP, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER, getFolderPrefix } from "@lib/paths"
 import { DEFAULT_OBSIDIAN_BASE_URL } from "../../background-script/obsidian"
 import { parseTranscriptFile } from "@lib/transcript-import"
+import { meetingsDroppedBy, trimMeetings } from "@lib/retention"
+import { DEFAULT_SUMMARY_INSTRUCTIONS } from "../../background-script/summarizer"
 import {
     buildSettingsFile,
     getWantedPlatforms,
@@ -209,6 +211,10 @@ document.addEventListener("DOMContentLoaded", function () {
     setupParticipantNameSetting()
     setupSettingsTransfer()
     setupTranscriptImport()
+    setupRetentionSetting()
+    setupMeetingsFilter()
+    setupSummaryPrompt()
+    showRecentErrors()
     setupObsidianSettings()
 
     if (showAllButton instanceof HTMLButtonElement) {
@@ -786,15 +792,20 @@ function setupObsidianSettings(): void {
             }
 
             const result = JSON.parse(String(response.message)) as {
-                transcripts: number, summaries: number, failed: number, firstError?: string
+                transcripts: number, summaries: number, skipped: number, failed: number, firstError?: string
             }
             const parts = [`${result.transcripts} transcript${result.transcripts === 1 ? "" : "s"}`]
             if (result.summaries > 0) {
                 parts.push(`${result.summaries} summar${result.summaries === 1 ? "y" : "ies"}`)
             }
+            if (result.skipped > 0) {
+                parts.push(`${result.skipped} already in the vault, left untouched`)
+            }
             testResult.textContent = result.failed > 0
-                ? `Sent ${parts.join(" and ")}. ${result.failed} could not be written: ${result.firstError ?? ""}`
-                : `Sent ${parts.join(" and ")} to your vault.`
+                ? `Sent ${parts.join(", ")}. ${result.failed} could not be written: ${result.firstError ?? ""}`
+                : (result.transcripts === 0 && result.summaries === 0
+                    ? `Everything is already in your vault. Existing notes were not overwritten, so any edits you made are safe.`
+                    : `Sent ${parts.join(", ")} to your vault.`)
             loadMeetings()
         })
     })
@@ -846,6 +857,136 @@ function requestObsidianPermission(baseUrl: string): Promise<string> {
     })
 }
 
+/** The instructions sent to ChatGPT, editable so tone, sections and language can change. */
+function setupSummaryPrompt(): void {
+    const form = document.querySelector<HTMLFormElement>("#summary-prompt-form")
+    const field = document.querySelector<HTMLTextAreaElement>("#summary-prompt")
+    const reset = document.querySelector<HTMLButtonElement>("#reset-summary-prompt")
+    if (!form || !field) return
+
+    chrome.storage.sync.get(["summaryPrompt"], function (resultSyncUntyped) {
+        const resultSync = resultSyncUntyped as Partial<ResultSync>
+        field.value = resultSync.summaryPrompt || DEFAULT_SUMMARY_INSTRUCTIONS
+    })
+
+    form.addEventListener("submit", function (e) {
+        e.preventDefault()
+        chrome.storage.sync.set({ summaryPrompt: field.value.trim() }, function () {
+            alert("Summary instructions saved. They apply to the next summary.")
+        })
+    })
+
+    reset?.addEventListener("click", function () {
+        field.value = DEFAULT_SUMMARY_INSTRUCTIONS
+        chrome.storage.sync.set({ summaryPrompt: "" }, function () {
+            alert("Back to the default instructions.")
+        })
+    })
+}
+
+/**
+ * Surfaces capture failures recorded on this device.
+ *
+ * Without this the only record is a service worker console nobody opens, which leaves a
+ * user whose transcript broke with nothing to look at or report.
+ */
+function showRecentErrors(): void {
+    const panel = document.querySelector<HTMLDetailsElement>("#recent-errors")
+    const count = document.querySelector<HTMLElement>("#recent-errors-count")
+    const list = document.querySelector<HTMLElement>("#recent-errors-list")
+    if (!panel || !count || !list) return
+
+    chrome.storage.local.get(["recentErrors"], function (resultUntyped) {
+        const errors = (resultUntyped as Partial<ResultLocal>).recentErrors ?? []
+        if (errors.length === 0) {
+            panel.hidden = true
+            return
+        }
+        panel.hidden = false
+        count.textContent = `${errors.length} capture problem${errors.length === 1 ? "" : "s"} recorded on this device`
+        list.textContent = errors
+            .map(e => `${new Date(e.at).toLocaleString()}  [${e.code}]  ${e.meetingSoftware || "unknown"}\n    ${e.message}`)
+            .join("\n")
+    })
+}
+
+/** How many meetings are kept before the oldest are deleted. */
+function setupRetentionSetting(): void {
+    const form = document.querySelector<HTMLFormElement>("#meetings-to-keep-form")
+    const input = document.querySelector<HTMLInputElement>("#meetings-to-keep")
+    if (!form || !input) return
+
+    chrome.storage.sync.get(["meetingsToKeep"], function (resultSyncUntyped) {
+        const resultSync = resultSyncUntyped as Partial<ResultSync>
+        input.value = String(typeof resultSync.meetingsToKeep === "number"
+            ? resultSync.meetingsToKeep
+            : DEFAULT_MEETINGS_TO_KEEP)
+    })
+
+    form.addEventListener("submit", function (e) {
+        e.preventDefault()
+        const requested = Math.max(0, Math.min(500, Math.floor(Number(input.value) || 0)))
+
+        chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
+            const stored = (resultLocalUntyped as Partial<ResultLocal>).meetings ?? []
+
+            // Lowering the limit deletes meetings immediately, so say what will go and
+            // let the user back out. Silent deletion is what this setting exists to fix.
+            const wouldDelete = meetingsDroppedBy(stored, requested)
+            if (wouldDelete > 0 && !confirm(
+                `This removes ${wouldDelete} older meeting${wouldDelete === 1 ? "" : "s"} from the extension's list now.\n\n` +
+                `Obsidian notes and downloaded files are not affected — only the copy held in the browser.\n\nContinue?`)) {
+                return
+            }
+
+            chrome.storage.sync.set({ meetingsToKeep: requested }, function () {
+                if (wouldDelete > 0) {
+                    chrome.storage.local.set({ meetings: trimMeetings(stored, requested) }, loadMeetings)
+                }
+                input.value = String(requested)
+                alert(requested === 0
+                    ? "Every meeting will be kept in the extension."
+                    : `Keeping the most recent ${requested} meetings in the extension. Obsidian notes and downloaded files are unaffected.`)
+            })
+        })
+    })
+}
+
+/** Filters the table by title, platform or date, without touching stored data. */
+function setupMeetingsFilter(): void {
+    const filter = document.querySelector<HTMLInputElement>("#meetings-filter")
+    if (!filter) return
+
+    filter.addEventListener("input", function () {
+        const term = filter.value.trim().toLowerCase()
+        const rows = document.querySelectorAll<HTMLTableRowElement>("#meetings-table tr")
+        let shown = 0
+
+        rows.forEach(row => {
+            const match = !term || (row.innerText || "").toLowerCase().includes(term)
+            row.hidden = !match
+            if (match) shown++
+        })
+
+        const empty = document.querySelector<HTMLElement>("#meetings-filter-empty")
+        if (empty) empty.hidden = !(term && shown === 0)
+    })
+}
+
+/**
+ * Escapes a value for interpolation into markup.
+ *
+ * Meeting titles are user-controlled three ways — renamed inline, taken from an imported
+ * file name, and read from the meeting page's own title — so they cannot be trusted into
+ * innerHTML. MV3's CSP blocks inline script, but unescaped markup can still spoof the
+ * table's controls and fetch a remote URL through an injected tag.
+ */
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (ch) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] as string
+    ))
+}
+
 /** Load and display recent transcripts */
 function loadMeetings(): void {
     const meetingsTable = document.querySelector("#meetings-table")
@@ -869,13 +1010,19 @@ function loadMeetings(): void {
                     row.innerHTML = `
                     <td>
                         <div contenteditable="true" class="meeting-title" data-index="${i}" title="Rename">
-                        ${meeting.meetingTitle || meeting.title || "Google Meet call"}
+                        ${escapeHtml(meeting.meetingTitle || meeting.title || "Google Meet call")}
                     </div>
                     </td>
                     <td>
-                     ${meeting.meetingSoftware ? meeting.meetingSoftware : ""} 
+                     ${escapeHtml(meeting.meetingSoftware ?? "")} 
                     </td>
-                    <td>${timestamp} &nbsp; &#9679; &nbsp; ${durationString}</td>
+                    <td>${escapeHtml(timestamp)} &nbsp; &#9679; &nbsp; ${escapeHtml(durationString)}${
+                        meeting.transcript.length === 0 && meeting.captionsSeen === false
+                            ? `<br><span class="status status-failed" title="The captions panel never appeared, so nothing could be captured">Captions never started</span>`
+                            : meeting.transcript.length === 0
+                                ? `<br><span class="status status-new" title="Capture ran, but nobody spoke with captions on">No speech captured</span>`
+                                : ``
+                    }</td>
                     <td>
                         ${(
                             () => {
@@ -968,6 +1115,16 @@ function loadMeetings(): void {
                     const summarizeButton = row.querySelector(".summarize-button")
                     if (summarizeButton instanceof HTMLButtonElement) {
                         summarizeButton.addEventListener("click", function () {
+                            // Said here rather than only in settings: this is the moment
+                            // the transcript leaves the device, and it is the only feature
+                            // that sends it to a third party.
+                            if (!sessionStorage.getItem("chatgpt-disclosure-accepted")) {
+                                if (!confirm("Summarising sends this meeting's full transcript to ChatGPT, where OpenAI's terms and data handling apply.\n\nContinue?")) {
+                                    return
+                                }
+                                sessionStorage.setItem("chatgpt-disclosure-accepted", "1")
+                            }
+
                             // Requested from the click so it counts as a user gesture,
                             // which Chrome requires for an optional host permission.
                             requestChatGptPermission().then(() => {
@@ -1098,12 +1255,13 @@ function loadMeetings(): void {
                     const deleteButton = row.querySelector(".delete-button")
                     if (deleteButton instanceof HTMLButtonElement) {
                         deleteButton.addEventListener("click", function () {
-                            if (confirm("Delete this meeting?")) {
-                                meetings.splice(i, 1)
-                                chrome.storage.local.set({ meetings: meetings }, function () {
-                                    console.log("Meeting title updated")
-                                })
+                            // Only the extension's copy. Obsidian notes and downloaded
+                            // files are the permanent record and are never touched here.
+                            if (!confirm("Remove this meeting from the list?\n\nObsidian notes and downloaded files are not affected.")) {
+                                return
                             }
+                            meetings.splice(i, 1)
+                            chrome.storage.local.set({ meetings: meetings }, loadMeetings)
                         })
                     }
                 }
@@ -1114,7 +1272,7 @@ function loadMeetings(): void {
                 }
             }
             else {
-                meetingsTable.innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>No meetings yet</strong>Join a meeting with captions on and the transcript will appear here automatically.</div></td></tr>`
+                meetingsTable.innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>No meetings yet</strong>Join a meeting with captions on and the transcript appears here automatically.<br><br>Worth setting up first: your name, so your own speech is not labelled &ldquo;You&rdquo;, and Obsidian or a webhook if you want transcripts to land somewhere else. All below.</div></td></tr>`
             }
         }
     })

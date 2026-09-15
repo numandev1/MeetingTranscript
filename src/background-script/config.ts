@@ -52,6 +52,3 @@ export const PLATFORM_CONFIGS: Record<Platform, PlatformConfig> = {
         permissions: ["notifications", "declarativeNetRequestWithHostAccess"]
     }
 }
-
-export const ALARM_NAME = "dailyPermissionCheck"
-export const INTERVAL_IN_MINUTES = 24 * 60 // 24 hours

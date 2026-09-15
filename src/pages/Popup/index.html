@@ -51,6 +51,8 @@
       padding: var(--space-2) 0;
     }
 
+    .platform-row { align-items: flex-start; }
+
     .platform-row label {
       margin-bottom: 0;
       font-weight: 450;
@@ -139,12 +141,16 @@
     </div>
     <div class="platform-row">
       <input type="checkbox" id="enable-teams">
-      <label for="enable-teams">Microsoft Teams</label>
+      <label for="enable-teams">Microsoft Teams
+        <span class="sub-text">Transcript only &mdash; no chat capture</span>
+      </label>
       <span class="beta-tag">Beta</span>
     </div>
     <div class="platform-row">
       <input type="checkbox" id="enable-zoom">
-      <label for="enable-zoom">Zoom</label>
+      <label for="enable-zoom">Zoom
+        <span class="sub-text">Transcript only &mdash; no chat capture</span>
+      </label>
       <span class="beta-tag">Beta</span>
     </div>
   </section>

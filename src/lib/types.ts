@@ -77,6 +77,11 @@ export interface Meeting {
    * before this existed.
    */
   accountEmail?: string
+  /**
+   * Whether the captions region was ever found during the meeting. Distinguishes
+   * "nobody spoke" from "capture never started", which otherwise look identical.
+   */
+  captionsSeen?: boolean
   /** Summary produced by ChatGPT, as markdown. */
   summary?: string
   summaryStatus?: "new" | "failed" | "successful"
@@ -156,6 +161,15 @@ export interface ExtensionResponse {
   message?: string | string[] | ErrorObject
 }
 
+export interface RecentError {
+  /** ISO timestamp of when it happened. */
+  at: string
+  /** Code from the table at the bottom of this file. */
+  code: string
+  meetingSoftware: MeetingSoftware
+  message: string
+}
+
 export interface ErrorObject {
   errorCode: string
   errorMessage: string
@@ -180,8 +194,16 @@ export interface ResultLocal {
    * pickupLastMeetingFromStorage() if the content script never got to flush it.
    */
   liveTranscriptBlock: TranscriptBlock | null | undefined
+  /**
+   * Recent capture errors, newest last. Kept locally so a user whose transcript failed
+   * has something to look at and attach to a report — the removed upstream telemetry
+   * used to be the only record, and a service worker console is not one.
+   */
+  recentErrors: RecentError[] | undefined
   /** Account the in-progress meeting is being attended from. */
   accountEmail: string | undefined
+  /** Whether the captions region was seen during the in-progress meeting. */
+  captionsSeen: boolean | undefined
   /** Whether the extension has a deferred update waiting to be applied. */
   isDeferredUpdatedAvailable: boolean | undefined
   meetings: Meeting[] | undefined
@@ -210,6 +232,13 @@ export interface ResultSync {
   obsidianFolder: string
   /** Vault-relative folder the meeting summaries are written into. */
   obsidianSummaryFolder: string
+  /**
+   * How many meetings to keep on the device. Older ones are removed when a new meeting
+   * is filed. 0 means keep everything.
+   */
+  meetingsToKeep: number
+  /** Instructions sent to ChatGPT ahead of the transcript. Empty means the default. */
+  summaryPrompt: string
   /** Base URL of the Obsidian Local REST API, e.g. http://127.0.0.1:27123 */
   obsidianBaseUrl: string
   operationMode: OperationMode

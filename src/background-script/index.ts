@@ -1,5 +1,4 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, ResultLocal, ResultSync } from "@lib/types"
-import { ALARM_NAME } from "./config"
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
@@ -17,11 +16,10 @@ import {
 import {
     clearTabIdAndApplyUpdate,
     openExtensionPopup,
-    checkAndCreateAlarm,
     openSidePanel,
     captureAccountEmail
 } from "./utils"
-import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER } from "@lib/paths"
+import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_MEETINGS_TO_KEEP, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER } from "@lib/paths"
 import { DEFAULT_OBSIDIAN_BASE_URL } from "./obsidian"
 
 // Registered at the top level so it is in place on every service worker wake
@@ -443,6 +441,7 @@ chrome.runtime.onInstalled.addListener(() => {
             obsidianEnabled: resultSync.obsidianEnabled === true ? true : false,
             obsidianFolder: typeof resultSync.obsidianFolder === "string" ? resultSync.obsidianFolder : DEFAULT_OBSIDIAN_FOLDER,
             obsidianSummaryFolder: typeof resultSync.obsidianSummaryFolder === "string" ? resultSync.obsidianSummaryFolder : DEFAULT_OBSIDIAN_SUMMARY_FOLDER,
+            meetingsToKeep: typeof resultSync.meetingsToKeep === "number" ? resultSync.meetingsToKeep : DEFAULT_MEETINGS_TO_KEEP,
             obsidianBaseUrl: typeof resultSync.obsidianBaseUrl === "string" && resultSync.obsidianBaseUrl ? resultSync.obsidianBaseUrl : DEFAULT_OBSIDIAN_BASE_URL,
             operationMode: resultSync.operationMode === "manual" ? "manual" : "auto",
             hideCaptions: resultSync.hideCaptions === true ? true : false,
@@ -456,13 +455,6 @@ chrome.runtime.onInstalled.addListener(() => {
             reRegisterContentScripts()
         })
 
-        checkAndCreateAlarm()
     })
 })
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === ALARM_NAME) {
-        console.log("Alarm triggered: Running daily check...")
-        // checkPermissionsAndOpenMeetingsPage()
-    }
-})

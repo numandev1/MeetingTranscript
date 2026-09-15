@@ -509,3 +509,62 @@ dialog::backdrop {
 .icon-guide { -webkit-mask-image: url("../icons/guide.svg"); mask-image: url("../icons/guide.svg"); }
 .icon-key { -webkit-mask-image: url("../icons/key.svg"); mask-image: url("../icons/key.svg"); }
 .icon-vault { -webkit-mask-image: url("../icons/vault.svg"); mask-image: url("../icons/vault.svg"); }
+
+/* Visible only to assistive technology */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+input[type="search"],
+input[type="number"] {
+    width: 100%;
+    font: inherit;
+    font-size: var(--text-base);
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.65rem;
+    transition: border-color var(--dur-fast) var(--ease);
+}
+
+input[type="search"]:focus,
+input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+/* A caution note attached to the action it describes */
+.caution {
+    display: block;
+    color: var(--warning);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+}
+
+/* Keyboard users land on a long action-dense table; let them jump past the chrome */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: var(--space-2);
+    background: var(--accent);
+    color: var(--accent-ink);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    text-decoration: none;
+    z-index: var(--z-toast);
+}
+
+.skip-link:focus {
+    left: var(--space-4);
+}

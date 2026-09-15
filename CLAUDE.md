@@ -117,11 +117,27 @@ This is the most fragile part of the codebase: it depends on selectors in a page
 
 The transcript dialog's Obsidian and Download actions both **follow whichever note is on screen**: in summary mode they target the summary (`post_summary_obsidian_at_index`, the summary file), otherwise the transcript. One control per job rather than four buttons, matching how the row actions already behave.
 
+### Vault layout
+
+Every note is filed at **parent / account / note**, and the account level is always present — `unknown-account` when the address cannot be read, which is every Teams and Zoom meeting and anything recorded before account detection existed.
+
+Uniform depth is the point: a note that sometimes sits one level up and sometimes two makes vault-side searches, Bases and templates conditional on something the user cannot see. `withAccountSubfolder` therefore substitutes the fallback both before sanitising (an empty address would otherwise mean "the root") and after (an address that sanitises away to nothing would collapse the level).
+
+### Retention only touches the extension's copy
+
+`trimMeetings` in `src/lib/retention.ts` takes meetings and returns meetings. It has no access to the vault, the download folder or the webhook, which is what makes the setting's promise true rather than merely intended: raising or lowering the limit can only affect the copy the browser holds.
+
+**Nothing in this extension deletes a vault note.** Not retention, not the per-meeting delete button, not a re-sync. The vault is the permanent record and the meetings list is a working copy of the last N; the two have deliberately different lifetimes. A user who wants a note gone deletes it in Obsidian.
+
+That is a product decision, not an oversight — so if a future change needs to remove a note, it needs a deliberate, separately confirmed action of its own, never a side effect of a cleanup setting or a list operation.
+
 ### Backfilling the vault
 
 `syncAllMeetingsToObsidian()` writes every stored meeting, and any summaries, in one action. It runs **sequentially**: the target is a plugin inside the user's editor, and concurrent writes gain nothing while making a partial failure impossible to report accurately. It also **stops early on error 019** (vault unreachable), since that will fail for every remaining meeting too.
 
 Note names lead with the timestamp (`2026-09-14 0930 Standup`) because Obsidian's file explorer sorts alphabetically by file name. With the title first, a new meeting lands wherever its title falls alphabetically instead of at the end of the folder. The time is part of the name so several meetings in one day still order correctly.
+
+**The bulk sync does not overwrite a note that already exists.** A note in the vault may carry the user's own work — ticked action items, added context — and this action exists to backfill, not to republish. It reports how many it skipped. The per-meeting Obsidian button still overwrites, because that is an explicit choice about one note.
 
 Re-running is safe by design — notes are addressed by title and date, so a second run replaces the same notes rather than duplicating them, which makes this usable as a repair action.
 

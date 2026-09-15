@@ -8,6 +8,11 @@
     "build": "node utils/dev-build.js",
     "start": "node utils/watch.js",
     "check": "tsc -p tsconfig.json --noEmit",
+    "pretest": "tsc -p tsconfig.json --outDir .test-build --module commonjs --moduleResolution node --noEmit false --declaration false",
+    "test": "node --test test/",
+    "check:selectors": "node scripts/check-selectors.mjs",
+    "format": "prettier --write \"src/**/*.{ts,css,html}\" \"test/**/*.mjs\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,css,html}\"",
     "zip": "NODE_ENV=production ./node_modules/.bin/webpack --config ./utils/build.js --mode production"
   },
   "devDependencies": {
@@ -16,6 +21,7 @@
     "copy-webpack-plugin": "^12.0.2",
     "html-loader": "^5.1.0",
     "html-webpack-plugin": "^5.6.0",
+    "prettier": "^3.9.6",
     "terser-webpack-plugin": "^5.3.10",
     "ts-loader": "^9.5.1",
     "typescript": "^5.9.3",

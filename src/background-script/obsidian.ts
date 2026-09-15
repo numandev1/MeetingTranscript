@@ -178,6 +178,16 @@ export function postSummaryToObsidian(index: number): Promise<string> {
     })
 }
 
+/** True when a note already exists at this vault path. */
+async function vaultNoteExists(baseUrl: string | undefined, apiKey: string, vaultPath: string): Promise<boolean> {
+    const url = (baseUrl || DEFAULT_OBSIDIAN_BASE_URL).replace(/\/+$/, "")
+    const encodedPath = vaultPath.split("/").map(encodeURIComponent).join("/")
+    const response = await fetch(`${url}/vault/${encodedPath}`, {
+        headers: { "Authorization": `Bearer ${apiKey}` }
+    }).catch(() => null)
+    return response?.ok === true
+}
+
 /** PUTs a note into the vault, creating parent folders. */
 function putVaultNote(baseUrl: string | undefined, apiKey: string, vaultPath: string, body: string): Promise<void> {
     const url = (baseUrl || DEFAULT_OBSIDIAN_BASE_URL).replace(/\/+$/, "")
@@ -286,6 +296,8 @@ export function postTranscriptToObsidian(index: number): Promise<string> {
 export interface VaultSyncResult {
     transcripts: number
     summaries: number
+    /** Notes already in the vault, left untouched so user edits survive. */
+    skipped: number
     failed: number
     firstError?: string
 }
@@ -318,12 +330,32 @@ export function syncAllMeetingsToObsidian(): Promise<VaultSyncResult> {
                 return
             }
 
-            const result: VaultSyncResult = { transcripts: 0, summaries: 0, failed: 0 }
+            const result: VaultSyncResult = { transcripts: 0, summaries: 0, skipped: 0, failed: 0 }
+
+            const settings = await new Promise<Partial<ResultSync>>(res =>
+                chrome.storage.sync.get(["obsidianFolder", "obsidianSummaryFolder", "obsidianBaseUrl"],
+                    r => res(r as Partial<ResultSync>)))
 
             for (let index = 0; index < meetings.length; index++) {
+                const meeting = meetings[index]
+                const noteName = `${getObsidianNoteName(meeting)}.md`
+                const transcriptPath = withAccountSubfolder(
+                    getFolderPrefix(settings.obsidianFolder, DEFAULT_OBSIDIAN_FOLDER), meeting.accountEmail) + noteName
+                const summaryPath = withAccountSubfolder(
+                    getFolderPrefix(settings.obsidianSummaryFolder, DEFAULT_OBSIDIAN_SUMMARY_FOLDER), meeting.accountEmail) + noteName
+
                 try {
-                    await postTranscriptToObsidian(index)
-                    result.transcripts++
+                    // Existing notes are left alone: this action backfills a vault, and a
+                    // note already there may carry the user's own edits — ticked action
+                    // items, added context — which a blind overwrite would destroy. The
+                    // per-meeting save button still overwrites, because that is explicit.
+                    if (await vaultNoteExists(settings.obsidianBaseUrl, resultLocal.obsidianApiKey, transcriptPath)) {
+                        result.skipped++
+                    }
+                    else {
+                        await postTranscriptToObsidian(index)
+                        result.transcripts++
+                    }
                 }
                 catch (error) {
                     result.failed++
@@ -338,10 +370,15 @@ export function syncAllMeetingsToObsidian(): Promise<VaultSyncResult> {
                     continue
                 }
 
-                if (meetings[index].summary) {
+                if (meeting.summary) {
                     try {
-                        await postSummaryToObsidian(index)
-                        result.summaries++
+                        if (await vaultNoteExists(settings.obsidianBaseUrl, resultLocal.obsidianApiKey, summaryPath)) {
+                            result.skipped++
+                        }
+                        else {
+                            await postSummaryToObsidian(index)
+                            result.summaries++
+                        }
                     }
                     catch (error) {
                         const parsedError = error as ErrorObject
@@ -354,3 +391,4 @@ export function syncAllMeetingsToObsidian(): Promise<VaultSyncResult> {
         })
     })
 }
+

@@ -1,4 +1,4 @@
-import type { ErrorObject, Meeting, ResultLocal } from "@lib/types"
+import type { ErrorObject, Meeting, ResultLocal, ResultSync } from "@lib/types"
 import { getTranscriptString } from "./utils"
 
 const CHATGPT_URL = "https://chatgpt.com/"
@@ -21,7 +21,28 @@ const STABLE_POLLS_REQUIRED = 4
 const END_MARKER = "<!--meetingtranscript-end-->"
 const POLL_INTERVAL_MS = 1000
 
-export function buildSummaryPrompt(meeting: Meeting): string {
+/** The instructions used when the user has not written their own. */
+export const DEFAULT_SUMMARY_INSTRUCTIONS = [
+    "Summarise the following meeting transcript. The transcript comes from automatic captions, so expect some transcription errors and ignore them.",
+    "",
+    "Reply with a single fenced code block containing markdown, and nothing outside it.",
+    `The very last line inside the block must be exactly ${END_MARKER}`,
+    "Inside the block use exactly these sections:",
+    "",
+    "## Summary",
+    "Two to four sentences.",
+    "",
+    "## Key points",
+    "Short bullets.",
+    "",
+    "## Decisions",
+    'Short bullets, or "None recorded".',
+    "",
+    "## Action items",
+    'Bullets shaped "- [ ] Owner — task", or "None recorded".',
+].join("\n")
+
+export function buildSummaryPrompt(meeting: Meeting, instructions?: string): string {
     const title = meeting.meetingTitle || meeting.title || "Meeting"
     const participants = [...new Set(meeting.transcript.map(block => block.personName))].filter(name => name.trim())
 
@@ -30,31 +51,19 @@ export function buildSummaryPrompt(meeting: Meeting): string {
         transcript = transcript.slice(0, MAX_TRANSCRIPT_CHARS) + "\n\n[transcript truncated]"
     }
 
+    // The end marker is how completion is detected, so it is appended even to custom
+    // instructions rather than trusting the user to include it.
+    const chosen = (instructions ?? "").trim() || DEFAULT_SUMMARY_INSTRUCTIONS
+    const withMarker = chosen.includes(END_MARKER)
+        ? chosen
+        : `${chosen}\n\nEnd your reply with a final line containing exactly ${END_MARKER}`
+
     return [
-        "Summarise the following meeting transcript. The transcript comes from automatic captions, so expect some transcription errors and ignore them.",
+        withMarker,
         "",
         `Meeting: ${title}`,
         `Date: ${new Date(meeting.meetingStartTimestamp).toLocaleString()}`,
         participants.length > 0 ? `Participants: ${participants.join(", ")}` : "",
-        "",
-        // The answer is read back out of the rendered page, where innerText would flatten
-        // "## Summary" into "Summary". Asking for a fenced block keeps the markdown
-        // characters intact, because code block text is not reformatted.
-        "Reply with a single fenced code block containing markdown, and nothing outside it.",
-        `The very last line inside the block must be exactly ${END_MARKER}`,
-        "Inside the block use exactly these sections:",
-        "",
-        "## Summary",
-        "Two to four sentences.",
-        "",
-        "## Key points",
-        "Short bullets.",
-        "",
-        "## Decisions",
-        'Short bullets, or "None recorded".',
-        "",
-        "## Action items",
-        'Bullets shaped "- [ ] Owner — task", or "None recorded".',
         "",
         "Transcript:",
         "",
@@ -242,8 +251,12 @@ export function summarizeMeeting(index: number): Promise<string> {
             }
 
             try {
+                const instructions = await new Promise<string | undefined>(resolve =>
+                    chrome.storage.sync.get(["summaryPrompt"], (r) =>
+                        resolve((r as Partial<ResultSync>).summaryPrompt)))
+
                 const tabId = await openChatGptTab()
-                const submitted = await submitPrompt(tabId, buildSummaryPrompt(meeting))
+                const submitted = await submitPrompt(tabId, buildSummaryPrompt(meeting, instructions))
 
                 if (!submitted) {
                     throw { errorCode: "020", errorMessage: "Could not open ChatGPT. Grant access to chatgpt.com and make sure you are signed in." } satisfies ErrorObject

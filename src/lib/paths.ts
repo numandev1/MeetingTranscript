@@ -45,17 +45,32 @@ export function getFolderPrefix(subfolder: string | undefined, defaultFolder: st
 }
 
 /**
- * Nests a folder prefix under the account the meeting was attended from, so meetings
- * from different accounts are filed separately.
+ * Folder used when the account a meeting was attended from cannot be determined.
  *
- * Returns the prefix untouched when the account is unknown, which is the case on
- * platforms where it cannot be read and on meetings recorded before this existed.
+ * Only Google Meet exposes the signed-in address, so Teams and Zoom meetings — and any
+ * meeting recorded before account detection existed — land here.
+ */
+export const UNKNOWN_ACCOUNT_FOLDER = "unknown-account"
+
+/**
+ * Nests a folder prefix under the account the meeting was attended from, so the vault is
+ * always parent / account / note.
+ *
+ * The account level is always present, including when the address is unknown: a uniform
+ * depth means every note sits at the same level, which keeps the folder navigable and
+ * makes vault-side tooling — searches, Bases, templates — predictable.
  */
 export function withAccountSubfolder(folderPrefix: string, accountEmail: string | undefined): string {
-    if (!accountEmail) {
-        return folderPrefix
-    }
-    // Reuse the same sanitising rules; an address only ever contributes one segment
-    const accountSegment = getFolderPrefix(accountEmail, "")
-    return `${folderPrefix}${accountSegment}`
+    const account = (accountEmail ?? "").trim()
+    // getFolderPrefix treats an empty value as "the root", which would flatten the
+    // structure, so the fallback is substituted before sanitising and again after, in
+    // case the address sanitises away to nothing.
+    const segment = getFolderPrefix(account || UNKNOWN_ACCOUNT_FOLDER, UNKNOWN_ACCOUNT_FOLDER)
+    return `${folderPrefix}${segment || `${UNKNOWN_ACCOUNT_FOLDER}/`}`
 }
+
+/** Meetings retained when the user has not chosen a limit. */
+export const DEFAULT_MEETINGS_TO_KEEP = 10
+
+/** Upper bound offered in the UI; 0 is "keep everything". */
+export const MAX_MEETINGS_TO_KEEP = 500
