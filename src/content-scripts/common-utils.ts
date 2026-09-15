@@ -54,7 +54,7 @@ export function createContentScriptState(meetingSoftware: MeetingSoftware, platf
         hasMeetingEnded: false,
         extensionStatusJSON: {
             status: 200,
-            message: "<strong>TranscripTonic is running</strong> <br /> Do not turn off captions"
+            message: "<strong>MeetingTranscript is running</strong> <br /> Do not turn off captions"
         }
     }
 }
@@ -103,7 +103,7 @@ export function checkExtensionStatus(state: ContentScriptState): Promise<string>
                 // Disable extension if version is below the min version
                 if (!meetsMinVersion(chrome.runtime.getManifest().version, minVersion)) {
                     state.extensionStatusJSON.status = 400
-                    state.extensionStatusJSON.message = `<strong>TranscripTonic is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/numandev/transcriptonic/wiki/Manually-update-TranscripTonic" target="_blank">these instructions</a>`
+                    state.extensionStatusJSON.message = `<strong>MeetingTranscript is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/numandev/transcriptonic/wiki/Manually-update-MeetingTranscript" target="_blank">these instructions</a>`
                 }
                 else {
                     // Update status based on response
@@ -385,11 +385,11 @@ export function pulseStatus(): void {
     z-index: 100;
     transition: background-color 0.3s ease-in
   `
-    let activityStatus = document.querySelector<HTMLDivElement>(`#transcriptonic-status`)
+    let activityStatus = document.querySelector<HTMLDivElement>(`#meetingtranscript-status`)
     if (!activityStatus) {
         const html = document.querySelector("html")
         activityStatus = document.createElement("div")
-        activityStatus.setAttribute("id", "transcriptonic-status")
+        activityStatus.setAttribute("id", "meetingtranscript-status")
         activityStatus.style.cssText = `background-color: #2A9ACA; ${statusActivityCSS}`
         html?.appendChild(activityStatus)
     }
@@ -425,14 +425,14 @@ export function renderFab(state: ContentScriptState): void {
 
     const html = document.querySelector("html")
     const fab = document.createElement("button")
-    fab.id = "transcriptonic-fab"
-    fab.ariaLabel = "TranscripTonic"
-    fab.title = "TranscripTonic"
+    fab.id = "meetingtranscript-fab"
+    fab.ariaLabel = "MeetingTranscript"
+    fab.title = "MeetingTranscript"
     fab.style.cssText = fabCss
 
     fab.innerHTML = `
         <div id="fab-main-content" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
-            <img id="fab-default-logo" src="${LOGO_URL}" alt="TranscripTonic" draggable="false" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img id="fab-default-logo" src="${LOGO_URL}" alt="MeetingTranscript" draggable="false" style="width: 20px; height: 20px; object-fit: contain;" />
             <span id="fab-letter-mark" style="display: none; color: #ffffff; font-weight: bold; font-size: 16px; text-transform: uppercase; font-family: sans-serif;"></span>
         </div>
 
@@ -532,7 +532,7 @@ function makeVerticallyDraggable(fab: HTMLButtonElement): void {
 
 /** Updates the FAB visual state based on the current transcript data. */
 export function updateFabState(state: ContentScriptState): void {
-    const fab = document.querySelector("#transcriptonic-fab")
+    const fab = document.querySelector("#meetingtranscript-fab")
 
     const defaultLogo = fab?.querySelector<HTMLElement>("#fab-default-logo")
     const letterMark = fab?.querySelector<HTMLElement>("#fab-letter-mark")
@@ -562,7 +562,7 @@ export function updateFabState(state: ContentScriptState): void {
 }
 
 export function unmountFab(): void {
-    const fab = document.querySelector("#transcriptonic-fab")
+    const fab = document.querySelector("#meetingtranscript-fab")
     if (fab) {
         fab.remove()
     }

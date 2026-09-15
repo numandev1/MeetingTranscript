@@ -271,3 +271,75 @@ export function postTranscriptToObsidian(index: number): Promise<string> {
         })
     })
 }
+
+export interface VaultSyncResult {
+    transcripts: number
+    summaries: number
+    failed: number
+    firstError?: string
+}
+
+/**
+ * Writes every stored meeting into the vault, transcripts and any summaries.
+ *
+ * Runs sequentially rather than in parallel: the target is a local plugin inside the
+ * user's editor, and firing ten concurrent writes at it gains nothing while making a
+ * partial failure much harder to report accurately.
+ *
+ * Notes are addressed by meeting title and date, so re-running replaces the existing
+ * note instead of creating duplicates, which makes this safe to use as a repair action.
+ *
+ * @throws error codes: 013, 018
+ */
+export function syncAllMeetingsToObsidian(): Promise<VaultSyncResult> {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get(["meetings", "obsidianApiKey"], async function (resultLocalUntyped) {
+            const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+
+            if (!resultLocal.obsidianApiKey) {
+                reject({ errorCode: "018", errorMessage: "Obsidian is not configured" } satisfies ErrorObject)
+                return
+            }
+
+            const meetings = resultLocal.meetings ?? []
+            if (meetings.length === 0) {
+                reject({ errorCode: "013", errorMessage: "No meetings found. May be attend one?" } satisfies ErrorObject)
+                return
+            }
+
+            const result: VaultSyncResult = { transcripts: 0, summaries: 0, failed: 0 }
+
+            for (let index = 0; index < meetings.length; index++) {
+                try {
+                    await postTranscriptToObsidian(index)
+                    result.transcripts++
+                }
+                catch (error) {
+                    result.failed++
+                    const parsedError = error as ErrorObject
+                    result.firstError = result.firstError ?? parsedError.errorMessage
+
+                    // An unreachable vault will fail for every remaining meeting too,
+                    // so stop rather than grinding through nine more timeouts.
+                    if (parsedError.errorCode === "019") {
+                        break
+                    }
+                    continue
+                }
+
+                if (meetings[index].summary) {
+                    try {
+                        await postSummaryToObsidian(index)
+                        result.summaries++
+                    }
+                    catch (error) {
+                        const parsedError = error as ErrorObject
+                        result.firstError = result.firstError ?? parsedError.errorMessage
+                    }
+                }
+            }
+
+            resolve(result)
+        })
+    })
+}

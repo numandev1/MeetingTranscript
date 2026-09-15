@@ -1,5 +1,5 @@
 /** Download folder used when the user has not chosen one. */
-export const DEFAULT_DOWNLOAD_SUBFOLDER = "TranscripTonic"
+export const DEFAULT_DOWNLOAD_SUBFOLDER = "MeetingTranscript"
 
 /** Vault folder used when the user has not chosen one. */
 export const DEFAULT_OBSIDIAN_FOLDER = "Meetings"

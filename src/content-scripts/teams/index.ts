@@ -102,7 +102,7 @@ function teamsMeetingRoutines(state: ContentScriptState): void {
       const resultSync = resultSyncUntyped as Partial<ResultSync>
       if (resultSync.operationMode === "manual") {
         console.log("Manual mode selected, leaving transcript off")
-        showNotificationTeams({ status: 400, message: "<strong>TranscripTonic is not running</strong> <br /> Turn on captions, if needed (More > Language > Captions)" })
+        showNotificationTeams({ status: 400, message: "<strong>MeetingTranscript is not running</strong> <br /> Turn on captions, if needed (More > Language > Captions)" })
       }
       else {
         // Allow keyboard event listener to be ready

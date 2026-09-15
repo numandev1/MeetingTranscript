@@ -95,6 +95,11 @@ const config = {
           },
         },
         {
+          from: path.join(__dirname, 'src', 'styles'),
+          to: path.join(__dirname, 'build', 'styles'),
+          force: true,
+        },
+        {
           from: path.join(__dirname, 'src', 'rules.json'),
           to: path.join(__dirname, 'build', 'rules.json'),
           force: true,

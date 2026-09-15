@@ -1,4 +1,4 @@
-# TranscripTonic
+# MeetingTranscript
 Simple Google Meet transcripts. Private and open source. 
 > Teams and Zoom transcripts in beta. <a href="https://github.com/numandev/transcriptonic/wiki/Zoom-and-Teams-beta-testing" target="_blank">Learn
           more</a>.
@@ -30,21 +30,21 @@ View video on [YouTube](https://www.youtube.com/watch?v=ARL6HbkakX4)
 <br />
 <br />
 
-# How to use TranscripTonic
+# How to use MeetingTranscript
 ![screenshot-2](/assets/screenshot-2.png)
-TranscripTonic has two modes of operation.
+MeetingTranscript has two modes of operation.
 
 **In both modes, transcript will be downloaded as a text file at the end of each meeting.**
 
 - **Auto mode:** Automatically records transcripts for all meetings
-- **Manual mode:** Switch on TranscripTonic by clicking on captions icon in Google Meet (CC icon)
+- **Manual mode:** Switch on MeetingTranscript by clicking on captions icon in Google Meet (CC icon)
 
 
 <br />
 <br />
 
-# Integrating TranscripTonic with other tools using webhooks
-You can integrate TranscripTonic with any tool that accepts data from a webhook. Refer the "Set up webhooks" page in the extension for details about the webhook body.
+# Integrating MeetingTranscript with other tools using webhooks
+You can integrate MeetingTranscript with any tool that accepts data from a webhook. Refer the "Set up webhooks" page in the extension for details about the webhook body.
 - [Google Docs integration guide](https://github.com/numandev/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=readme)
 - [n8n integration guide](https://github.com/numandev/transcriptonic/wiki/n8n-integration-guide?utm_source=readme)
 
@@ -55,7 +55,7 @@ You can integrate TranscripTonic with any tool that accepts data from a webhook.
 
 **1. Can I change the language of the transcript?**
 
-Yes. TranscripTonic picks up the output of Google Meet captions. Google Meet captions supports variety of languages that you can choose from. Click the settings icon when captions start showing and change the language.
+Yes. MeetingTranscript picks up the output of Google Meet captions. Google Meet captions supports variety of languages that you can choose from. Click the settings icon when captions start showing and change the language.
 
 **2. I did not get any transcript at the end of the meeting.**
 
@@ -65,14 +65,14 @@ This could happen when:
 
 When this happens, it might be possible to recover the transcript, but recovery should be done before starting another meeting.
 - Open the extension and click on "last 10 meetings". Click on "Recover last meeting" button present after the table.
-- TranscripTonic will also attempt to auto-recover any missed transcripts, just before a new meeting starts.
+- MeetingTranscript will also attempt to auto-recover any missed transcripts, just before a new meeting starts.
 
 <br />
 <br />
 
 # Development
 
-TranscripTonic is written in TypeScript and bundled with webpack. The loadable extension is the generated `build/` directory, not `src/`.
+MeetingTranscript is written in TypeScript and bundled with webpack. The loadable extension is the generated `build/` directory, not `src/`.
 
 ```bash
 npm install
@@ -95,7 +95,7 @@ Source layout:
 <br />
 
 # Privacy policy
-TranscripTonic Chrome extension does not collect any information from users in any manner, except anonymous errors and transcript download timestamp. All processing/transcript storage happens within the user's Chrome browser and does not leave the device, unless you configure a webhook and choose to post data to your webhook URL.
+MeetingTranscript Chrome extension does not collect any information from users in any manner, except anonymous errors and transcript download timestamp. All processing/transcript storage happens within the user's Chrome browser and does not leave the device, unless you configure a webhook and choose to post data to your webhook URL.
 
 <br />
 <br />

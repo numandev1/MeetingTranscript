@@ -1,6 +1,14 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Meeting, Platform, ResultLocal, ResultSync } from "@lib/types"
 import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER, getFolderPrefix } from "@lib/paths"
 import { DEFAULT_OBSIDIAN_BASE_URL } from "../../background-script/obsidian"
+import { parseTranscriptFile } from "@lib/transcript-import"
+import {
+    buildSettingsFile,
+    getWantedPlatforms,
+    parseSettingsFile,
+    TRANSFERABLE_SYNC_KEYS,
+    withObsidianEnabled,
+} from "@lib/settings-transfer"
 
 let isMeetingsTableExpanded = false
 
@@ -199,6 +207,8 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     setupParticipantNameSetting()
+    setupSettingsTransfer()
+    setupTranscriptImport()
     setupObsidianSettings()
 
     if (showAllButton instanceof HTMLButtonElement) {
@@ -256,6 +266,7 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
     const closeButton = document.querySelector<HTMLButtonElement>("#transcript-dialog-close")
     const copyButton = document.querySelector<HTMLButtonElement>("#transcript-dialog-copy")
     const downloadButton = document.querySelector<HTMLButtonElement>("#transcript-dialog-download")
+    const obsidianButton = document.querySelector<HTMLButtonElement>("#transcript-dialog-obsidian")
 
     if (!dialog || !titleElement || !metaElement || !bodyElement) {
         return
@@ -323,6 +334,38 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
             })
         }
     }
+    if (obsidianButton) {
+        // Follows whichever note is on screen, like the download action beside it
+        const savesSummary = (focus === "summary") && !!meeting.summary
+        obsidianButton.textContent = savesSummary ? "Save summary to Obsidian" : "Save to Obsidian"
+        obsidianButton.disabled = false
+        obsidianButton.onclick = () => {
+            obsidianButton.disabled = true
+            obsidianButton.textContent = "Saving..."
+
+            const message: ExtensionMessage = {
+                type: savesSummary ? "post_summary_obsidian_at_index" : "post_obsidian_at_index",
+                index: index
+            }
+            chrome.runtime.sendMessage(message, (responseUntyped) => {
+                const response = responseUntyped as ExtensionResponse
+                obsidianButton.disabled = false
+
+                if (response.success) {
+                    obsidianButton.textContent = "Saved to Obsidian"
+                    loadMeetings()
+                    return
+                }
+
+                obsidianButton.textContent = savesSummary ? "Save summary to Obsidian" : "Save to Obsidian"
+                const parsedError = response.message as ErrorObject
+                alert(parsedError?.errorCode === "018"
+                    ? "Add your Obsidian API key in the settings below first."
+                    : (parsedError?.errorMessage ?? "Could not save to Obsidian."))
+            })
+        }
+    }
+
     if (downloadButton) {
         const wantsSummary = (focus === "summary") && !!meeting.summary
         downloadButton.textContent = wantsSummary ? "Download summary" : "Download"
@@ -397,6 +440,191 @@ function getPlainText(meeting: Meeting): string {
     return content
 }
 
+/**
+ * Brings exported .txt transcripts back in as meetings, so files from another computer
+ * (or from before a reinstall) can be summarised and filed to Obsidian like any other.
+ */
+function setupTranscriptImport(): void {
+    const importButton = document.querySelector<HTMLButtonElement>("#import-transcript")
+    const fileInput = document.querySelector<HTMLInputElement>("#import-transcript-file")
+    const result = document.querySelector<HTMLElement>("#import-transcript-result")
+
+    if (!importButton || !fileInput) {
+        return
+    }
+
+    const report = (message: string, isError = false) => {
+        if (!result) return
+        result.textContent = message
+        result.style.color = isError ? "var(--danger)" : "var(--success)"
+    }
+
+    importButton.addEventListener("click", () => fileInput.click())
+
+    fileInput.addEventListener("change", async function () {
+        const files = [...(fileInput.files ?? [])]
+        if (files.length === 0) return
+
+        const imported: Meeting[] = []
+        const failures: string[] = []
+
+        for (const file of files) {
+            try {
+                imported.push(parseTranscriptFile(file.name, await file.text()))
+            }
+            catch (error) {
+                failures.push(`${file.name}: ${error instanceof Error ? error.message : "could not be read"}`)
+            }
+        }
+
+        fileInput.value = ""
+
+        if (imported.length === 0) {
+            report(failures[0] ?? "Nothing could be imported.", true)
+            return
+        }
+
+        chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
+            const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+            const existing = resultLocal.meetings ?? []
+
+            // A file already in the list is an update, not a second copy
+            const merged = [...existing]
+            let added = 0
+            let updated = 0
+            for (const meeting of imported) {
+                const match = merged.findIndex(m => m.meetingStartTimestamp === meeting.meetingStartTimestamp
+                    && (m.meetingTitle || m.title) === meeting.meetingTitle)
+                if (match >= 0) {
+                    // Keep whatever the existing entry already earned
+                    merged[match] = { ...meeting, summary: merged[match].summary, summaryStatus: merged[match].summaryStatus }
+                    updated++
+                }
+                else {
+                    merged.push(meeting)
+                    added++
+                }
+            }
+
+            merged.sort((a, b) => a.meetingStartTimestamp.localeCompare(b.meetingStartTimestamp))
+
+            // Only the newest 10 are kept, so say plainly when that pushes something out
+            // rather than letting meetings disappear silently.
+            const dropped = Math.max(0, merged.length - 10)
+            const kept = merged.slice(-10)
+
+            chrome.storage.local.set({ meetings: kept }, function () {
+                loadMeetings()
+                const parts: string[] = []
+                if (added > 0) parts.push(`${added} imported`)
+                if (updated > 0) parts.push(`${updated} updated`)
+                if (failures.length > 0) parts.push(`${failures.length} skipped`)
+                let message = parts.join(", ") + "."
+                if (dropped > 0) {
+                    message += ` ${dropped} older meeting${dropped === 1 ? "" : "s"} dropped to keep the most recent 10.`
+                }
+                report(message, failures.length > 0 && added === 0)
+            })
+        })
+    })
+}
+
+/**
+ * Export and import of the whole configuration, so a second computer can be set up
+ * without repeating every field by hand.
+ */
+function setupSettingsTransfer(): void {
+    const exportButton = document.querySelector<HTMLButtonElement>("#export-settings")
+    const importButton = document.querySelector<HTMLButtonElement>("#import-settings")
+    const fileInput = document.querySelector<HTMLInputElement>("#import-settings-file")
+    const includeKeyToggle = document.querySelector<HTMLInputElement>("#export-include-key")
+    const result = document.querySelector<HTMLElement>("#transfer-result")
+
+    if (!exportButton || !importButton || !fileInput) {
+        return
+    }
+
+    const report = (message: string, isError = false) => {
+        if (!result) return
+        result.textContent = message
+        result.style.color = isError ? "var(--danger)" : "var(--success)"
+    }
+
+    exportButton.addEventListener("click", function () {
+        chrome.storage.sync.get([...TRANSFERABLE_SYNC_KEYS], function (resultSyncUntyped) {
+            const settings = resultSyncUntyped as Partial<ResultSync>
+
+            chrome.storage.local.get(["obsidianApiKey"], function (resultLocalUntyped) {
+                const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+                const includeKey = includeKeyToggle?.checked !== false
+                const file = buildSettingsFile(settings, includeKey ? resultLocal.obsidianApiKey : undefined)
+
+                // Built in the page rather than the service worker so the file lands
+                // through the browser's own save flow
+                const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" })
+                const url = URL.createObjectURL(blob)
+                const link = document.createElement("a")
+                link.href = url
+                link.download = `meetingtranscript-settings-${new Date().toISOString().slice(0, 10)}.json`
+                link.click()
+                URL.revokeObjectURL(url)
+
+                report(file.obsidianApiKey
+                    ? "Exported, including the Obsidian API key. Keep the file private."
+                    : "Exported. The Obsidian API key was left out, so you will need to paste it on the other computer.")
+            })
+        })
+    })
+
+    importButton.addEventListener("click", () => fileInput.click())
+
+    fileInput.addEventListener("change", function () {
+        const file = fileInput.files?.[0]
+        if (!file) return
+
+        file.text().then((raw) => {
+            const parsed = parseSettingsFile(raw)
+            // A transferred setup is being set up to file notes, so Obsidian comes on
+            const settings = withObsidianEnabled(parsed.settings)
+
+            const origins = [`${new URL(settings.obsidianBaseUrl || DEFAULT_OBSIDIAN_BASE_URL).origin}/*`]
+            const platforms = getWantedPlatforms(settings)
+
+            // One prompt covering everything the imported setup needs. This runs inside
+            // the file-picker's change event, which still counts as a user gesture.
+            chrome.permissions.request({ origins }).catch(() => false).then(() => {
+                chrome.storage.sync.set(settings, function () {
+                    const finish = () => {
+                        // Re-register content scripts for the platforms the file asked for
+                        if (platforms.length > 0) {
+                            chrome.runtime.sendMessage({ type: "enable_platform", platform: platforms } satisfies ExtensionMessage, () => {
+                                report("Settings imported and Obsidian switched on. Reloading...")
+                                setTimeout(() => location.reload(), 1200)
+                            })
+                        }
+                        else {
+                            report("Settings imported and Obsidian switched on. Reloading...")
+                            setTimeout(() => location.reload(), 1200)
+                        }
+                    }
+
+                    if (parsed.obsidianApiKey) {
+                        chrome.storage.local.set({ obsidianApiKey: parsed.obsidianApiKey }, finish)
+                    }
+                    else {
+                        finish()
+                    }
+                })
+            })
+        }).catch((error) => {
+            report(error instanceof Error ? error.message : "Could not read that file.", true)
+        }).finally(() => {
+            // Allow re-importing the same file
+            fileInput.value = ""
+        })
+    })
+}
+
 /** The name written into transcripts wherever captions say "You". */
 function setupParticipantNameSetting(): void {
     const form = document.querySelector<HTMLFormElement>("#participant-name-form")
@@ -439,6 +667,7 @@ function setupObsidianSettings(): void {
     const baseUrlForm = document.querySelector<HTMLFormElement>("#obsidian-base-url-form")
     const baseUrlInput = document.querySelector<HTMLInputElement>("#obsidian-base-url")
     const testButton = document.querySelector<HTMLButtonElement>("#test-obsidian")
+    const syncAllButton = document.querySelector<HTMLButtonElement>("#sync-all-obsidian")
     const testResult = document.querySelector<HTMLElement>("#obsidian-test-result")
 
     chrome.storage.sync.get(["obsidianEnabled", "obsidianFolder", "obsidianSummaryFolder", "obsidianBaseUrl"], function (resultSyncUntyped) {
@@ -483,7 +712,7 @@ function setupObsidianSettings(): void {
             chrome.storage.sync.set({ obsidianEnabled: true }, function () { })
         }).catch((error) => {
             enabledToggle.checked = false
-            alert("TranscripTonic needs permission to talk to Obsidian on this machine.")
+            alert("MeetingTranscript needs permission to talk to Obsidian on this machine.")
             console.error("Obsidian permission error:", error)
         })
     })
@@ -531,8 +760,42 @@ function setupObsidianSettings(): void {
                 alert("Obsidian address saved!")
             })
         }).catch((error) => {
-            alert("TranscripTonic needs permission to talk to Obsidian at that address.")
+            alert("MeetingTranscript needs permission to talk to Obsidian at that address.")
             console.error("Obsidian permission error:", error)
+        })
+    })
+
+    syncAllButton?.addEventListener("click", function () {
+        if (!testResult) return
+        const originalLabel = syncAllButton.textContent
+        syncAllButton.disabled = true
+        syncAllButton.textContent = "Sending..."
+        testResult.textContent = "Writing meetings into your vault..."
+
+        chrome.runtime.sendMessage({ type: "sync_all_to_obsidian" } satisfies ExtensionMessage, (responseUntyped) => {
+            const response = responseUntyped as ExtensionResponse
+            syncAllButton.disabled = false
+            syncAllButton.textContent = originalLabel
+
+            if (!response.success) {
+                const parsedError = response.message as ErrorObject
+                testResult.textContent = parsedError?.errorCode === "018"
+                    ? "Add your Obsidian API key above first."
+                    : (parsedError?.errorMessage ?? "Could not write to your vault.")
+                return
+            }
+
+            const result = JSON.parse(String(response.message)) as {
+                transcripts: number, summaries: number, failed: number, firstError?: string
+            }
+            const parts = [`${result.transcripts} transcript${result.transcripts === 1 ? "" : "s"}`]
+            if (result.summaries > 0) {
+                parts.push(`${result.summaries} summar${result.summaries === 1 ? "y" : "ies"}`)
+            }
+            testResult.textContent = result.failed > 0
+                ? `Sent ${parts.join(" and ")}. ${result.failed} could not be written: ${result.firstError ?? ""}`
+                : `Sent ${parts.join(" and ")} to your vault.`
+            loadMeetings()
         })
     })
 
@@ -618,13 +881,13 @@ function loadMeetings(): void {
                             () => {
                                 switch (meeting.webhookPostStatus) {
                                     case "successful":
-                                        return `<span class="status-success">Successful</span>`
+                                        return `<span class="status status-success">Successful</span>`
                                     case "failed":
-                                        return `<span class="status-failed">Failed</span>`
+                                        return `<span class="status status-failed">Failed</span>`
                                     case "new":
-                                        return `<span class="status-new">New</span>`
+                                        return `<span class="status status-new">New</span>`
                                     default:
-                                        return `<span class="status-new">Unknown</span>`
+                                        return `<span class="status status-new">Unknown</span>`
                                 }
                             }
                         )()}
@@ -634,9 +897,9 @@ function loadMeetings(): void {
                             () => {
                                 switch (meeting.obsidianPostStatus) {
                                     case "successful":
-                                        return `<span class="status-success">Saved</span>`
+                                        return `<span class="status status-success">Saved</span>`
                                     case "failed":
-                                        return `<span class="status-failed">Failed</span> <button class="obsidian-button" data-index="${i}" title="Retry saving to Obsidian">Retry</button>`
+                                        return `<span class="status status-failed">Failed</span> <button class="obsidian-button" data-index="${i}" title="Retry saving to Obsidian">Retry</button>`
                                     default:
                                         return `<button class="obsidian-button" data-index="${i}" title="Save this meeting to Obsidian">Save</button>`
                                 }
@@ -644,26 +907,26 @@ function loadMeetings(): void {
                         )()}
                     </td>
                     <td>
-                        <div style="display: flex; gap: 1rem; justify-content: end">
+                        <div class="row-actions">
                             <button class="view-button" data-index="${i}" title="View transcript" aria-label="View this meeting transcript">
-                                <img src="./icons/view.svg" alt="">
+                                <span class="icon icon-view"></span>
                             </button>
                             ${meeting.summary ? `<button class="view-summary-button" data-index="${i}" title="View summary" aria-label="View this meeting summary">
                                 Summary
-                            </button>` : ``}
+                            </button>` : `<span class="summary-slot"></span>`}
                             <button class="summarize-button" data-index="${i}" title="${meeting.summary ? `Re-summarise with ChatGPT` : `Summarise with ChatGPT`}" aria-label="Summarise this meeting with ChatGPT">
                                 ${meeting.summary ? `Re-summarise` : `Summarise`}
                             </button>
                             <button class="download-button" data-index="${i}" title="Download" aria-label="Download this meeting transcript">
-                                <img src="./icons/download.svg" alt="">
+                                <span class="icon icon-download"></span>
                             </button>
                             <button class="post-button" data-index="${i}" title="${meeting.webhookPostStatus === "new" ? `Post webhook` : `Repost webhook`}" aria-label="${meeting.webhookPostStatus === "new" ? `` : ``}">
                                 ${meeting.webhookPostStatus === "new" ? `` : ``}
-                                <img src="./icons/webhook.svg" alt="">
+                                <span class="icon icon-webhook"></span>
                             </button>
                             &nbsp;
                              <button class="delete-button" data-index="${i}" title="Delete" aria-label="Delete this meeting">
-                                <img src="./icons/delete.svg" alt="">
+                                <span class="icon icon-delete"></span>
                             </button>
                         </div>
                     </td>
@@ -731,7 +994,7 @@ function loadMeetings(): void {
                                     }
                                 })
                             }).catch(() => {
-                                alert("TranscripTonic needs access to chatgpt.com to summarise meetings.")
+                                alert("MeetingTranscript needs access to chatgpt.com to summarise meetings.")
                             })
                         })
                     }
@@ -851,7 +1114,7 @@ function loadMeetings(): void {
                 }
             }
             else {
-                meetingsTable.innerHTML = `<tr><td colspan="6">Your next meeting will show up here</td></tr>`
+                meetingsTable.innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>No meetings yet</strong>Join a meeting with captions on and the transcript will appear here automatically.</div></td></tr>`
             }
         }
     })

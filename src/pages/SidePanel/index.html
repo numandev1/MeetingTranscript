@@ -1,86 +1,128 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <meta charset="utf-8">
-    <title>Transcript Sidebar</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live transcript</title>
+    <link rel="stylesheet" href="styles/app.css">
     <style>
-        @import url("https://fonts.googleapis.com/css2?family=TASA+Explorer:wght@400;700&display=swap");
-
-        html {
-            scroll-behavior: smooth;
-        }
-
         body {
-            margin: 0;
-            font-family: "TASA Explorer", sans-serif;
-            background: #071f29;
-            color: #C0C0C0;
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            height: 100vh;
-            accent-color: #2A9ACA;
+            overflow: hidden;
         }
 
-        .header {
-            background: #2a9aca1a;
-            padding: 16px;
-            border-bottom: 1px solid #2a9aca33;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        .panel-header {
+            padding: var(--space-4) var(--space-4) var(--space-3);
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
         }
 
-        h1 {
-            margin: 0;
-            font-size: 16px;
-            font-weight: 700;
+        /* The title is editable, so it needs to look editable on hover */
+        #meeting-title {
+            font-size: var(--text-md);
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            padding: 0.15rem 0.3rem;
+            margin: -0.15rem -0.3rem;
+            transition: background-color var(--dur-fast) var(--ease);
+            cursor: text;
         }
 
-        /* Main scroll container */
+        #meeting-title:hover { background: var(--surface-hover); }
+
+        #meeting-title:focus {
+            outline: none;
+            background: var(--bg);
+            box-shadow: 0 0 0 2px var(--accent-line);
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
+            font-size: var(--text-xs);
+            color: var(--ink-subtle);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        @media (prefers-reduced-motion: no-preference) {
+            .live-dot { animation: pulse 2s var(--ease) infinite; }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+
         #transcript-container {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
-            box-sizing: border-box;
-            background: transparent;
+            padding: var(--space-4);
+            scroll-behavior: smooth;
         }
 
-        .transcript-block {
-            margin-bottom: 20px;
-        }
+        .transcript-block { margin-bottom: var(--space-4); }
 
         .block-header {
             display: flex;
-            justify-content: space-between;
-            margin-bottom: 4px;
-            font-size: 12px;
+            align-items: baseline;
+            gap: var(--space-2);
+            margin-bottom: 0.15rem;
         }
 
         .speaker-name {
-            color: #a0a0a0;
+            font-weight: 600;
+            font-size: var(--text-sm);
+            color: var(--accent);
         }
 
         .block-time {
-            color: #a0a0a0;
+            font-size: var(--text-xs);
+            color: var(--ink-subtle);
+            font-variant-numeric: tabular-nums;
         }
 
         .block-text {
-            margin: 0;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #C0C0C0;
-            word-break: break-word;
+            color: var(--ink-muted);
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        /* The in-progress utterance, distinguished from settled text */
+        #live-transcript-placeholder .block-text { color: var(--ink); }
+
+        #transcript-container:empty::after {
+            content: "Waiting for someone to speak. Captions must be on in the meeting.";
+            display: block;
+            padding: var(--space-6) var(--space-4);
+            text-align: center;
+            color: var(--ink-subtle);
+            font-size: var(--text-sm);
+            line-height: 1.6;
         }
     </style>
 </head>
 
 <body>
-
-    <div class="header">
-        <h1 id="meeting-title">Live Meeting Transcript</h1>
-    </div>
+    <header class="panel-header">
+        <h1 id="meeting-title">Live transcript</h1>
+        <div class="live-indicator">
+            <span class="live-dot"></span>
+            <span>Recording on this device</span>
+        </div>
+    </header>
 
     <div id="transcript-container"></div>
-
 </body>
 
 </html>

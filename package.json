@@ -1,8 +1,9 @@
 {
-  "name": "transcriptonic",
+  "name": "meetingtranscript",
   "private": true,
   "version": "3.4.3",
   "description": "Simple Google Meet transcripts. Private and open source.",
+  "author": "muhammadnuman70@gmail.com",
   "scripts": {
     "build": "node utils/dev-build.js",
     "start": "node utils/watch.js",

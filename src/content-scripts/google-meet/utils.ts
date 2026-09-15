@@ -81,7 +81,7 @@ export function updateMeetingTitleGoogleMeet(state: ContentScriptState): void {
             return
         }
         meetingTitleElement.setAttribute("contenteditable", "true")
-        meetingTitleElement.title = "Edit meeting title for TranscripTonic"
+        meetingTitleElement.title = "Edit meeting title for MeetingTranscript"
         meetingTitleElement.style.cssText = `text-decoration: underline white; text-underline-offset: 4px;`
 
         meetingTitleElement.addEventListener("input", handleMeetingTitleElementChange)

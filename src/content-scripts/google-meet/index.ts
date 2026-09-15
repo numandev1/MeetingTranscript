@@ -113,7 +113,7 @@ function googleMeetRoutines(state: ContentScriptState): void {
                     chrome.storage.sync.get(["operationMode"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
                         if (resultSync.operationMode === "manual") {
-                            showNotificationGoogleMeet({ status: 400, message: "<strong>TranscripTonic is not running</strong> <br /> Turn on captions using the CC icon, if needed" })
+                            showNotificationGoogleMeet({ status: 400, message: "<strong>MeetingTranscript is not running</strong> <br /> Turn on captions using the CC icon, if needed" })
                         }
                         else {
                             showNotificationGoogleMeet(state.extensionStatusJSON)

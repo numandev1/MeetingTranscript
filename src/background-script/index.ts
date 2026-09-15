@@ -2,7 +2,7 @@ import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, Result
 import { ALARM_NAME } from "./config"
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
-import { postTranscriptToObsidian, postSummaryToObsidian } from "./obsidian"
+import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
 import { summarizeMeeting } from "./summarizer"
 import {
     getPermissionStatus,
@@ -136,6 +136,35 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
             const response: ExtensionResponse = { success: false, message: { errorCode: "015", errorMessage: "Invalid index" } }
             sendResponse(response)
         }
+    }
+
+    if (message.type === "post_summary_obsidian_at_index") {
+        if ((typeof message.index === "number") && (message.index >= 0)) {
+            postSummaryToObsidian(message.index)
+                .then(() => sendResponse({ success: true } satisfies ExtensionResponse))
+                .catch((error) => {
+                    // Fails with error codes: 010, 017, 018, 019
+                    const parsedError = error as ErrorObject
+                    console.error("Obsidian summary save failed:", parsedError)
+                    sendResponse({ success: false, message: parsedError } satisfies ExtensionResponse)
+                })
+        }
+        else {
+            const response: ExtensionResponse = { success: false, message: { errorCode: "015", errorMessage: "Invalid index" } }
+            sendResponse(response)
+        }
+    }
+
+    if (message.type === "sync_all_to_obsidian") {
+        syncAllMeetingsToObsidian()
+            .then((result) => {
+                sendResponse({ success: true, message: JSON.stringify(result) } satisfies ExtensionResponse)
+            })
+            .catch((error) => {
+                // Fails with error codes: 013, 018
+                const parsedError = error as ErrorObject
+                sendResponse({ success: false, message: parsedError } satisfies ExtensionResponse)
+            })
     }
 
     if (message.type === "post_obsidian_at_index") {

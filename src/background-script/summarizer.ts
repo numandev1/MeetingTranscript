@@ -18,7 +18,7 @@ const STABLE_POLLS_REQUIRED = 4
  * signal, which the DOM alone does not give: the stop button can vanish while text is
  * still streaming, and a partly streamed answer looks identical to a finished one.
  */
-const END_MARKER = "<!--transcriptonic-end-->"
+const END_MARKER = "<!--meetingtranscript-end-->"
 const POLL_INTERVAL_MS = 1000
 
 export function buildSummaryPrompt(meeting: Meeting): string {
