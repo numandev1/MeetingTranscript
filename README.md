@@ -1,6 +1,6 @@
 # TranscripTonic
 Simple Google Meet transcripts. Private and open source. 
-> Teams and Zoom transcripts in beta. <a href="https://github.com/vivek-nexus/transcriptonic/wiki/Zoom-and-Teams-beta-testing" target="_blank">Learn
+> Teams and Zoom transcripts in beta. <a href="https://github.com/numandev/transcriptonic/wiki/Zoom-and-Teams-beta-testing" target="_blank">Learn
           more</a>.
 
 ![marquee-large](/assets/marquee-large.png)
@@ -45,8 +45,8 @@ TranscripTonic has two modes of operation.
 
 # Integrating TranscripTonic with other tools using webhooks
 You can integrate TranscripTonic with any tool that accepts data from a webhook. Refer the "Set up webhooks" page in the extension for details about the webhook body.
-- [Google Docs integration guide](https://github.com/vivek-nexus/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=readme)
-- [n8n integration guide](https://github.com/vivek-nexus/transcriptonic/wiki/n8n-integration-guide?utm_source=readme)
+- [Google Docs integration guide](https://github.com/numandev/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=readme)
+- [n8n integration guide](https://github.com/numandev/transcriptonic/wiki/n8n-integration-guide?utm_source=readme)
 
 <br />
 <br />

@@ -1,5 +1,6 @@
-import type { ErrorObject, Meeting, ResultLocal, ResultSync } from "@lib/types"
+import type { ErrorObject, Meeting, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
+import { postTranscriptToObsidian } from "./obsidian"
 
 /**
  * Download transcripts, post webhook if URL is enabled and available.
@@ -12,7 +13,7 @@ export function processLastMeeting(): Promise<string> {
             .then(() => {
                 chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
                     const resultLocal = resultLocalUntyped as Partial<ResultLocal>
-                    chrome.storage.sync.get(["webhookUrl", "autoPostWebhookAfterMeeting", "autoDownloadFileAfterMeeting"], function (resultSyncUntyped) {
+                    chrome.storage.sync.get(["webhookUrl", "autoPostWebhookAfterMeeting", "autoDownloadFileAfterMeeting", "obsidianEnabled"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
 
                         // pickupLastMeetingFromStorage resolved, so at least one meeting exists
@@ -34,6 +35,13 @@ export function processLastMeeting(): Promise<string> {
                         // Promise to post webhook if enabled
                         if (resultSync.autoPostWebhookAfterMeeting && resultSync.webhookUrl) {
                             promises.push(postTranscriptToWebhook(lastIndex))
+                        }
+
+                        // Promise to save an Obsidian note if enabled. Obsidian runs
+                        // alongside the text file rather than replacing it: the app may
+                        // well be closed when a meeting ends, and the file is the backup.
+                        if (resultSync.obsidianEnabled) {
+                            promises.push(postTranscriptToObsidian(lastIndex))
                         }
 
                         // Execute all promises in parallel
@@ -65,6 +73,30 @@ export function processLastMeeting(): Promise<string> {
 }
 
 /**
+ * Appends the utterance that was still being spoken when the meeting ended.
+ *
+ * Closing the meeting tab kills the content script before it can flush its buffer, so
+ * the buffer is persisted separately as it is spoken. It is skipped when the content
+ * script did manage to flush — the same text would already be the last block.
+ */
+function mergeLiveTranscriptBlock(transcript: TranscriptBlock[], liveTranscriptBlock: TranscriptBlock | null | undefined): TranscriptBlock[] {
+    if (!liveTranscriptBlock || !liveTranscriptBlock.transcriptText) {
+        return transcript
+    }
+
+    const lastBlock = transcript[transcript.length - 1]
+    if (lastBlock
+        && (lastBlock.personName === liveTranscriptBlock.personName)
+        // The persisted copy lags the final text, so the flushed block starts with it
+        && (lastBlock.transcriptText.startsWith(liveTranscriptBlock.transcriptText))) {
+        return transcript
+    }
+
+    console.log("Recovered the utterance in progress when the meeting ended")
+    return [...transcript, liveTranscriptBlock]
+}
+
+/**
  * Process transcript and chat messages of the meeting that just ended from storage,
  * format them into strings, and save as a new entry in meetings (keeping last 10).
  * @throws error codes: 013, 014
@@ -77,11 +109,12 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
             "meetingStartTimestamp",
             "transcript",
             "chatMessages",
+            "liveTranscriptBlock",
         ], function (resultUntyped) {
             const result = resultUntyped as Partial<ResultLocal>
 
             if (result.meetingStartTimestamp) {
-                const transcript = result.transcript ?? []
+                const transcript = mergeLiveTranscriptBlock(result.transcript ?? [], result.liveTranscriptBlock)
                 const chatMessages = result.chatMessages ?? []
 
                 if ((transcript.length > 0) || (chatMessages.length > 0)) {
@@ -93,7 +126,8 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                         meetingEndTimestamp: new Date().toISOString(),
                         transcript: transcript,
                         chatMessages: chatMessages,
-                        webhookPostStatus: "new"
+                        webhookPostStatus: "new",
+                        obsidianPostStatus: "new"
                     }
 
                     // Get existing recent meetings and add the new meeting
@@ -107,8 +141,9 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                             meetings = meetings.slice(-10)
                         }
 
-                        // Save updated recent transcripts
-                        chrome.storage.local.set({ meetings: meetings }, function () {
+                        // Save updated recent transcripts, and drop the in-flight buffer
+                        // now that it is part of a saved meeting
+                        chrome.storage.local.set({ meetings: meetings, liveTranscriptBlock: null }, function () {
                             console.log("Last meeting picked up")
                             resolve("Last meeting picked up")
                         })

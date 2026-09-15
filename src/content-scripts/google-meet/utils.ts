@@ -4,14 +4,37 @@ import { overWriteChromeStorage, waitForElement } from "../common-utils"
 import { SELECTORS_GOOGLE_MEET } from "./config"
 
 /**
- * Returns all elements of the specified selector type and specified textContent.
- * Return array contains the actual element as well as all the parents.
+ * Returns all elements of the specified selector type whose text is exactly `text`.
+ *
+ * Matching is exact rather than a substring test: callers pass Google Symbols ligature
+ * names, and an unanchored match makes "chat" also select "chat_bubble", so the first
+ * result could be the wrong control entirely. waitForElement already compares exactly,
+ * so this keeps the two in agreement.
  */
-export function selectElements(selector: string, text: string | RegExp): HTMLElement[] {
+export function selectElements(selector: string, text: string): HTMLElement[] {
     const elements = document.querySelectorAll<HTMLElement>(selector)
     return Array.prototype.filter.call(elements, function (element: HTMLElement) {
-        return RegExp(text).test(element.textContent ?? "")
+        return (element.textContent ?? "").trim() === text
     })
+}
+
+/**
+ * Returns the button that actually toggles a control, given its Google Symbols ligature.
+ *
+ * Meet renders more than one element per ligature — "chat" matches both an offscreen
+ * copy with no button ancestor and the real toolbar control. Taking the first match
+ * therefore clicked a hidden, non-clickable element and the chat panel never opened,
+ * so no chat messages were ever rendered to be captured.
+ */
+export function selectControlButton(selector: string, text: string): HTMLElement | undefined {
+    const matches = selectElements(selector, text)
+    const clickable = matches
+        .map(element => element.closest("button") as HTMLElement | null)
+        .filter((button): button is HTMLElement => button !== null)
+
+    return clickable.find(button => button.getBoundingClientRect().width > 0)
+        ?? clickable[0]
+        ?? matches[0]
 }
 
 /** Shows a responsive notification of specified type and message */
@@ -86,6 +109,10 @@ export function captureUserName(state: ContentScriptState): void {
     waitForElement(SELECTORS_GOOGLE_MEET.USER_NAME).then(() => {
         // Poll the element until the textContent loads from network or until meeting starts
         const captureUserNameInterval = setInterval(() => {
+            if (state.isUserNameLocked) {
+                clearInterval(captureUserNameInterval)
+                return
+            }
             if (!state.hasMeetingStarted) {
                 const capturedUserName = document.querySelector(SELECTORS_GOOGLE_MEET.USER_NAME)?.textContent
                 if (capturedUserName) {

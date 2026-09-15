@@ -1,8 +1,10 @@
 import type { ContentScriptState, ErrorObject, ExtensionMessage, ResultSync } from "@lib/types"
 import { extensionStatusJSON_bug, reportErrorMessage } from "../common-config"
 import {
+  applyParticipantNameSetting,
   broadcastLiveBuffer,
   checkExtensionStatus,
+  clearLiveBuffer,
   createContentScriptState,
   logError,
   overWriteChromeStorage,
@@ -55,8 +57,11 @@ function initTeams(): void {
     finally(() => {
       // Initialise new state for current meeting
       const state = createContentScriptState("Teams", "teams")
+      applyParticipantNameSetting(state)
       // Push fresh state to chrome storage
       overWriteChromeStorage(state, ["meetingSoftware", "meetingStartTimestamp", "meetingTitle", "transcript", "chatMessages"], false)
+      // Drop any buffer left over from a meeting that was never picked up
+      clearLiveBuffer()
 
       checkExtensionStatus(state).finally(() => {
         console.log("Extension status " + state.extensionStatusJSON.status)

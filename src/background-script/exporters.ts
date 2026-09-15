@@ -1,5 +1,6 @@
 import type { ErrorObject, ResultLocal, ResultSync, WebhookBody } from "@lib/types"
 import { getTranscriptString, getChatMessagesString } from "./utils"
+import { getFolderPrefix, DEFAULT_DOWNLOAD_SUBFOLDER } from "@lib/paths"
 import { TIMEFORMAT } from "./config"
 
 /** @throws error codes: 009, 010 */
@@ -8,79 +9,85 @@ export function downloadTranscript(index: number, isWebhookEnabled?: boolean): P
         chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
             const resultLocal = resultLocalUntyped as Partial<ResultLocal>
 
-            if (resultLocal.meetings && resultLocal.meetings[index]) {
-                const meeting = resultLocal.meetings[index]
+            chrome.storage.sync.get(["downloadSubfolder"], function (resultSyncUntyped) {
+                const resultSync = resultSyncUntyped as Partial<ResultSync>
+                // "" when the user cleared the field, meaning save straight into Downloads
+                const folderPrefix = getFolderPrefix(resultSync.downloadSubfolder, DEFAULT_DOWNLOAD_SUBFOLDER)
 
-                // Sanitise meeting title to prevent invalid file name errors
-                // https://stackoverflow.com/a/78675894
-                const invalidFilenameRegex = /[:?"*<>|~/\\\u{1}-\u{1f}\u{7f}\u{80}-\u{9f}\p{Cf}\p{Cn}]|^[.\u{0}\p{Zl}\p{Zp}\p{Zs}]|[.\u{0}\p{Zl}\p{Zp}\p{Zs}]$|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?=\.|$)/gui
-                let sanitisedMeetingTitle = "Meeting"
-                if (meeting.meetingTitle) {
-                    sanitisedMeetingTitle = meeting.meetingTitle.replaceAll(invalidFilenameRegex, "_")
-                }
-                else if (meeting.title) {
-                    sanitisedMeetingTitle = meeting.title.replaceAll(invalidFilenameRegex, "_")
-                }
+                if (resultLocal.meetings && resultLocal.meetings[index]) {
+                    const meeting = resultLocal.meetings[index]
 
-                // Format timestamp for human-readable filename and sanitise to prevent invalid filenames
-                const timestamp = new Date(meeting.meetingStartTimestamp)
-                const formattedTimestamp = timestamp.toLocaleString("default", TIMEFORMAT).replace(/[\/:]/g, "-")
+                    // Sanitise meeting title to prevent invalid file name errors
+                    // https://stackoverflow.com/a/78675894
+                    const invalidFilenameRegex = /[:?"*<>|~/\\\u{1}-\u{1f}\u{7f}\u{80}-\u{9f}\p{Cf}\p{Cn}]|^[.\u{0}\p{Zl}\p{Zp}\p{Zs}]|[.\u{0}\p{Zl}\p{Zp}\p{Zs}]$|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?=\.|$)/gui
+                    let sanitisedMeetingTitle = "Meeting"
+                    if (meeting.meetingTitle) {
+                        sanitisedMeetingTitle = meeting.meetingTitle.replaceAll(invalidFilenameRegex, "_")
+                    }
+                    else if (meeting.title) {
+                        sanitisedMeetingTitle = meeting.title.replaceAll(invalidFilenameRegex, "_")
+                    }
 
-                const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} transcript` : "Transcript"
+                    // Format timestamp for human-readable filename and sanitise to prevent invalid filenames
+                    const timestamp = new Date(meeting.meetingStartTimestamp)
+                    const formattedTimestamp = timestamp.toLocaleString("default", TIMEFORMAT).replace(/[\/:]/g, "-")
 
-                const fileName = `TranscripTonic/${prefix}-${sanitisedMeetingTitle} at ${formattedTimestamp} on.txt`
+                    const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} transcript` : "Transcript"
+
+                    const fileName = `${folderPrefix}${prefix}-${sanitisedMeetingTitle} at ${formattedTimestamp} on.txt`
 
 
-                // Format transcript and chatMessages content
-                let content = getTranscriptString(meeting.transcript)
-                content += `\n\n---------------\nCHAT MESSAGES\n---------------\n\n`
-                content += getChatMessagesString(meeting.chatMessages)
+                    // Format transcript and chatMessages content
+                    let content = getTranscriptString(meeting.transcript)
+                    content += `\n\n---------------\nCHAT MESSAGES\n---------------\n\n`
+                    content += getChatMessagesString(meeting.chatMessages)
 
-                const blob = new Blob([content], { type: "text/plain" })
+                    const blob = new Blob([content], { type: "text/plain" })
 
-                // Read the blob as a data URL
-                const reader = new FileReader()
+                    // Read the blob as a data URL
+                    const reader = new FileReader()
 
-                // Read the blob
-                reader.readAsDataURL(blob)
+                    // Read the blob
+                    reader.readAsDataURL(blob)
 
-                // Download as text file, once blob is read
-                reader.onload = function (event) {
-                    if (event.target?.result) {
-                        const dataUrl = event.target.result as string
+                    // Download as text file, once blob is read
+                    reader.onload = function (event) {
+                        if (event.target?.result) {
+                            const dataUrl = event.target.result as string
 
-                        // Create a download with Chrome Download API
-                        chrome.downloads.download({
-                            url: dataUrl,
-                            filename: fileName,
-                            conflictAction: "uniquify"
-                        }).then(() => {
-                            console.log("Transcript downloaded")
-                            resolve("Transcript downloaded successfully")
-                        }).catch((err) => {
-                            console.error(err)
+                            // Create a download with Chrome Download API
                             chrome.downloads.download({
                                 url: dataUrl,
-                                filename: "TranscripTonic/Transcript.txt",
+                                filename: fileName,
                                 conflictAction: "uniquify"
-                            })
-                            console.log("Invalid file name. Transcript downloaded to TranscripTonic directory with simple file name.")
-                            resolve("Transcript downloaded successfully with default file name")
+                            }).then(() => {
+                                console.log("Transcript downloaded")
+                                resolve("Transcript downloaded successfully")
+                            }).catch((err) => {
+                                console.error(err)
+                                chrome.downloads.download({
+                                    url: dataUrl,
+                                    filename: `${folderPrefix}Transcript.txt`,
+                                    conflictAction: "uniquify"
+                                })
+                                console.log("Invalid file name. Transcript downloaded to the configured directory with simple file name.")
+                                resolve("Transcript downloaded successfully with default file name")
 
-                            // Logs anonymous errors to a Google sheet for swift debugging
-                            fetch(`https://script.google.com/macros/s/AKfycbz0VFUYIke1WK12Q-8y-zQ91bOPRZ8dAL4cRpm309IYZO0k6uYDkTSlfbWFaGvUV_Z-JQ/exec?version=${chrome.runtime.getManifest().version}&code=009&error=${encodeURIComponent(err)}&meetingSoftware=${meeting.meetingSoftware}`, { mode: "no-cors" })
-                        })
-                    }
-                    else {
-                        const error: ErrorObject = { errorCode: "009", errorMessage: "Failed to read blob" }
-                        reject(error)
+                                // Logs anonymous errors to a Google sheet for swift debugging
+                                fetch(`https://script.google.com/macros/s/AKfycbz0VFUYIke1WK12Q-8y-zQ91bOPRZ8dAL4cRpm309IYZO0k6uYDkTSlfbWFaGvUV_Z-JQ/exec?version=${chrome.runtime.getManifest().version}&code=009&error=${encodeURIComponent(err)}&meetingSoftware=${meeting.meetingSoftware}`, { mode: "no-cors" })
+                            })
+                        }
+                        else {
+                            const error: ErrorObject = { errorCode: "009", errorMessage: "Failed to read blob" }
+                            reject(error)
+                        }
                     }
                 }
-            }
-            else {
-                const error: ErrorObject = { errorCode: "010", errorMessage: "Meeting at specified index not found" }
-                reject(error)
-            }
+                else {
+                    const error: ErrorObject = { errorCode: "010", errorMessage: "Meeting at specified index not found" }
+                    reject(error)
+                }
+            })
         })
     })
 }

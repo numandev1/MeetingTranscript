@@ -46,6 +46,8 @@ export function createContentScriptState(meetingSoftware: MeetingSoftware, platf
         transcriptObserver: null,
         chatMessagesTargetNode: null,
         chatMessagesObserver: null,
+        isUserNameLocked: false,
+        capturedChatMessageIds: [],
         isTranscriptDomErrorCaptured: false,
         isChatMessagesDomErrorCaptured: false,
         hasMeetingStarted: false,
@@ -55,6 +57,26 @@ export function createContentScriptState(meetingSoftware: MeetingSoftware, platf
             message: "<strong>TranscripTonic is running</strong> <br /> Do not turn off captions"
         }
     }
+}
+
+/**
+ * Applies the user's configured display name, so captions attributed to "You" are
+ * written out under their real name.
+ *
+ * Auto-detection from the meeting UI only exists for Google Meet, so without this
+ * Teams and Zoom transcripts would always say "You".
+ */
+export function applyParticipantNameSetting(state: ContentScriptState): void {
+    chrome.storage.sync.get(["participantName"], function (resultSyncUntyped) {
+        const resultSync = resultSyncUntyped as Partial<ResultSync>
+        const participantName = resultSync.participantName?.trim()
+
+        if (participantName) {
+            state.userName = participantName
+            // Beats anything scraped from the meeting UI
+            state.isUserNameLocked = true
+        }
+    })
 }
 
 /**
@@ -81,7 +103,7 @@ export function checkExtensionStatus(state: ContentScriptState): Promise<string>
                 // Disable extension if version is below the min version
                 if (!meetsMinVersion(chrome.runtime.getManifest().version, minVersion)) {
                     state.extensionStatusJSON.status = 400
-                    state.extensionStatusJSON.message = `<strong>TranscripTonic is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/vivek-nexus/transcriptonic/wiki/Manually-update-TranscripTonic" target="_blank">these instructions</a>`
+                    state.extensionStatusJSON.message = `<strong>TranscripTonic is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/numandev/transcriptonic/wiki/Manually-update-TranscripTonic" target="_blank">these instructions</a>`
                 }
                 else {
                     // Update status based on response
@@ -278,7 +300,50 @@ export function startTranscriptMonitor(state: ContentScriptState, transcriptMuta
     }
 }
 
+/**
+ * Last time the in-flight buffer was written to storage. Throttled because this runs on
+ * every captions mutation, which can be several times a second.
+ */
+let lastLiveBufferPersistedAt = 0
+const LIVE_BUFFER_PERSIST_INTERVAL = 2000
+
+/**
+ * Persists the utterance currently being spoken.
+ *
+ * A closed tab kills the content script without running the meeting-end routine, so an
+ * unflushed buffer would otherwise be lost — and for a single speaker talking without
+ * interruption nothing is ever flushed, losing the whole meeting. The background script
+ * merges this back in when it picks the meeting up.
+ */
+function persistLiveBuffer(state: ContentScriptState): void {
+    const now = Date.now()
+    if (now - lastLiveBufferPersistedAt < LIVE_BUFFER_PERSIST_INTERVAL) {
+        return
+    }
+    lastLiveBufferPersistedAt = now
+
+    const { personName, timestamp, transcriptTextBuffer } = state.stateTranscriptBlock
+    if ((personName === "") || (transcriptTextBuffer === "")) {
+        return
+    }
+
+    const liveTranscriptBlock: TranscriptBlock = {
+        personName: personName === "You" ? state.userName : personName,
+        timestamp: timestamp,
+        transcriptText: transcriptTextBuffer
+    }
+    chrome.storage.local.set({ liveTranscriptBlock: liveTranscriptBlock })
+}
+
+/** Drops the persisted in-flight buffer, once it is safely part of the transcript. */
+export function clearLiveBuffer(): void {
+    lastLiveBufferPersistedAt = 0
+    chrome.storage.local.set({ liveTranscriptBlock: null })
+}
+
 export function broadcastLiveBuffer(state: ContentScriptState): void {
+    persistLiveBuffer(state)
+
     const message: ExtensionMessage = {
         type: "broadcast_live_buffer",
         stateTranscriptBlock: {
@@ -299,6 +364,7 @@ export function pushBufferToTranscript(state: ContentScriptState): void {
             "transcriptText": state.stateTranscriptBlock.transcriptTextBuffer
         })
         overWriteChromeStorage(state, ["transcript"], false)
+        clearLiveBuffer()
     }
 }
 

@@ -69,6 +69,11 @@ export interface Meeting {
   transcript: TranscriptBlock[]
   chatMessages: ChatMessage[]
   webhookPostStatus: "new" | "failed" | "successful"
+  /** Undefined for meetings recorded before the Obsidian integration existed. */
+  obsidianPostStatus?: "new" | "failed" | "successful"
+  /** Summary produced by ChatGPT, as markdown. */
+  summary?: string
+  summaryStatus?: "new" | "failed" | "successful"
 }
 
 /**
@@ -96,6 +101,13 @@ export interface ContentScriptState {
   transcriptObserver: MutationObserver | null
   chatMessagesTargetNode: Element | null
   chatMessagesObserver: MutationObserver | null
+  /**
+   * True once userName came from the user's own setting, which must not then be
+   * overwritten by whatever the meeting UI reports.
+   */
+  isUserNameLocked: boolean
+  /** data-message-id values already captured, so a re-sweep cannot duplicate them. */
+  capturedChatMessageIds: string[]
   isTranscriptDomErrorCaptured: boolean
   isChatMessagesDomErrorCaptured: boolean
   hasMeetingStarted: boolean
@@ -108,6 +120,8 @@ export type ExtensionMessageType =
   | "meeting_ended"
   | "download_transcript_at_index"
   | "post_webhook_at_index"
+  | "post_obsidian_at_index"
+  | "summarize_at_index"
   | "recover_last_meeting"
   | "get_platform_enablement_status"
   | "get_platform_permission_status"
@@ -151,9 +165,20 @@ export interface ResultLocal {
   transcript: TranscriptBlock[]
   /** Chat messages captured during the most recent meeting, dumped by the content script. */
   chatMessages: ChatMessage[]
+  /**
+   * The utterance currently being spoken, persisted periodically so it survives the
+   * meeting tab being closed mid-sentence. Merged into the transcript by
+   * pickupLastMeetingFromStorage() if the content script never got to flush it.
+   */
+  liveTranscriptBlock: TranscriptBlock | null | undefined
   /** Whether the extension has a deferred update waiting to be applied. */
   isDeferredUpdatedAvailable: boolean | undefined
   meetings: Meeting[] | undefined
+  /**
+   * Obsidian Local REST API key. Deliberately kept in local (not sync) storage so the
+   * credential never leaves the device, matching the extension's privacy promise.
+   */
+  obsidianApiKey: string | undefined
 }
 
 /** Shape of chrome.storage.sync. */
@@ -162,9 +187,29 @@ export interface ResultSync {
   autoPostWebhookAfterMeeting: boolean
   /** Whether to automatically download the transcript file after each meeting. */
   autoDownloadFileAfterMeeting: boolean
+  /**
+   * Folder the transcript text file is saved into, relative to the browser's Downloads
+   * directory. Empty string saves straight into Downloads. Chrome cannot write outside
+   * the Downloads directory, so this is always a relative path.
+   */
+  downloadSubfolder: string
+  /** Whether to save each meeting as a note in Obsidian via the Local REST API plugin. */
+  obsidianEnabled: boolean
+  /** Vault-relative folder the meeting notes are written into. */
+  obsidianFolder: string
+  /** Vault-relative folder the meeting summaries are written into. */
+  obsidianSummaryFolder: string
+  /** Base URL of the Obsidian Local REST API, e.g. http://127.0.0.1:27123 */
+  obsidianBaseUrl: string
   operationMode: OperationMode
   /** Hide the captions on the UI by changing height and opacity. */
   hideCaptions: boolean
+  /**
+   * The user's own display name, used wherever captions attribute speech to "You".
+   * Empty means fall back to auto-detection from the meeting UI, which only Google Meet
+   * supports, so Teams and Zoom rely on this being set.
+   */
+  participantName: string
   webhookBodyType: WebhookBodyType
   webhookUrl: string
   /**
@@ -202,3 +247,9 @@ export interface ResultSync {
 // | **013** | "No meetings found. May be attend one?" |
 // | **014** | "Empty transcript and empty chatMessages" |
 // | **015** | "Invalid index" |
+// | **017** | "Obsidian request failed with HTTP status code [number] [statusText]" |
+// | **018** | "Obsidian is not configured" |
+// | **019** | "Could not reach Obsidian. Is the app running with the Local REST API plugin enabled?" |
+// | **020** | "Could not open ChatGPT. Grant access to chatgpt.com and make sure you are signed in." |
+// | **021** | "ChatGPT did not return a summary in time" |
+// | **022** | "Nothing to summarise for this meeting" |

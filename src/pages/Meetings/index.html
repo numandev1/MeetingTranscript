@@ -303,6 +303,100 @@
             font-weight: bold
         }
 
+        #transcript-dialog {
+            width: min(780px, 90vw);
+            max-height: 85vh;
+            padding: 0;
+        }
+
+        /* Scoped to [open], otherwise this display would override the user agent's
+           `dialog:not([open]) { display: none }` and the dialog could never be hidden. */
+        #transcript-dialog[open] {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #transcript-dialog-header {
+            padding: 1.5rem 2rem 1rem 2rem;
+            border-bottom: 1px solid #2a9aca33;
+        }
+
+        #transcript-dialog-title {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: bold;
+        }
+
+        #transcript-dialog-meta {
+            margin: 0.35rem 0 0 0;
+        }
+
+        #transcript-dialog-body {
+            overflow-y: auto;
+            padding: 1.25rem 2rem;
+            flex: 1;
+        }
+
+        #transcript-dialog-body h3 {
+            margin: 0 0 0.75rem 0;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #2A9ACA;
+        }
+
+        #transcript-dialog-body h3:not(:first-child) {
+            margin-top: 2rem;
+        }
+
+        .dialog-block {
+            margin-bottom: 1.1rem;
+        }
+
+        .dialog-block-speaker {
+            font-weight: bold;
+        }
+
+        .dialog-block-time {
+            font-size: smaller;
+            opacity: 0.65;
+            margin-left: 0.5rem;
+        }
+
+        .dialog-block-text {
+            margin: 0.2rem 0 0 0;
+            white-space: pre-wrap;
+        }
+
+        #transcript-dialog-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 1rem 2rem 1.5rem 2rem;
+            border-top: 1px solid #2a9aca33;
+        }
+
+        #transcript-dialog-close {
+            background: transparent;
+            color: #2A9ACA;
+            border: 1px solid #2A9ACA;
+        }
+
+        .summarize-button {
+            background: transparent;
+            color: #2A9ACA;
+            border: 1px solid #2A9ACA;
+            padding: 0.25rem 0.6rem;
+            font-size: smaller;
+            white-space: nowrap;
+        }
+
+        .summarize-button:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+
+        .view-button,
         .download-button,
         .delete-button,
         .post-button {
@@ -394,6 +488,19 @@
             </div>
         </dialog>
 
+        <dialog id="transcript-dialog" closedby="any">
+            <div id="transcript-dialog-header">
+                <p id="transcript-dialog-title"></p>
+                <p id="transcript-dialog-meta" class="sub-text"></p>
+            </div>
+            <div id="transcript-dialog-body"></div>
+            <div id="transcript-dialog-footer">
+                <button id="transcript-dialog-close">Close</button>
+                <button id="transcript-dialog-copy">Copy</button>
+                <button id="transcript-dialog-download">Download</button>
+            </div>
+        </dialog>
+
         <h1>TranscripTonic</h1>
 
         <section id="last-10-meetings">
@@ -409,6 +516,7 @@
                             <th>Meeting software</th>
                             <th>Meeting start time and duration</th>
                             <th>Webhook status</th>
+                            <th>Obsidian</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -432,6 +540,26 @@
                 automation tools like n8n as a bridge.</b></p>
 
             <div class="grid-container">
+                <div class="card">
+                    <div class="webhook-header" style="display: flex; gap: 0.5rem; align-items: center;">
+                        <p class="card-heading">Your name</p>
+                    </div>
+
+                    <form id="participant-name-form" class="form-field">
+                        <label for="participant-name">Name to use for yourself</label>
+                        <div class="input-group">
+                            <input type="text" id="participant-name" placeholder="e.g. Numan">
+                            <button id="save-participant-name">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: 0.75rem;">
+                            Captions label your own speech as <b>You</b>. Set your name here and it is written into
+                            transcripts, webhooks and Obsidian notes instead. Google Meet can detect this on its own,
+                            but Teams and Zoom cannot &mdash; so leaving it empty means those transcripts keep saying
+                            <b>You</b>.
+                        </p>
+                    </form>
+                </div>
+
                 <div class="card">
                     <div class="webhook-header" style="display: flex; gap: 0.5rem; align-items: center;">
                         <p class="card-heading">Configure webhook</p>
@@ -464,6 +592,21 @@
 
                     <hr />
 
+                    <form id="download-folder-form" class="form-field">
+                        <label for="download-folder">Save transcript files to</label>
+                        <div class="input-group">
+                            <input type="text" id="download-folder" placeholder="TranscripTonic"
+                                aria-describedby="download-folder-help">
+                            <button id="save-download-folder">Save</button>
+                        </div>
+                        <p id="download-folder-help" class="sub-text" style="margin-top: 0.75rem;">
+                            A folder inside your browser's Downloads folder. Leave it empty to save straight into
+                            Downloads. Browser extensions are not allowed to save files anywhere outside Downloads.
+                        </p>
+                    </form>
+
+                    <hr />
+
                     <form class="form-field">
                         <div class="radio-item">
                             <input type="radio" name="webhook-body-type" id="simple-webhook-body" checked />
@@ -488,13 +631,13 @@
                     <p class="card-heading">Webhook integration guides</p>
                     <div class="integration-card">
                         <a class="integration-guide"
-                            href="https://github.com/vivek-nexus/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=extension"
+                            href="https://github.com/numandev/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=extension"
                             target="_blank">
                             <img src="./icons/guide.svg" alt="" width="16px">
                             <p>Get transcripts on Google Docs</p>
                         </a>
                         <a class="integration-guide"
-                            href="https://github.com/vivek-nexus/transcriptonic/wiki/n8n-integration-guide?utm_source=extension"
+                            href="https://github.com/numandev/transcriptonic/wiki/n8n-integration-guide?utm_source=extension"
                             target="_blank">
                             <img src="./icons/guide.svg" alt="" width="16px">
                             <p>Using webhooks with n8n</p>
@@ -561,6 +704,91 @@
                     </code>
                         </div>
                     </details>
+                </div>
+
+                <div class="card">
+                    <div class="webhook-header" style="display: flex; gap: 0.5rem; align-items: center;">
+                        <p class="card-heading">Save to Obsidian</p>
+                    </div>
+
+                    <p class="sub-text" style="margin-top: 0;">
+                        Saves every meeting as a note in your vault, alongside the text file. Requires the
+                        <a href="https://github.com/coddingtonbear/obsidian-local-rest-api" target="_blank">Local REST
+                            API</a> community plugin, with its <b>non-encrypted (HTTP) server</b> enabled &mdash; the
+                        HTTPS port uses a self-signed certificate that browser extensions cannot accept.
+                    </p>
+
+                    <form class="form-field">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="obsidian-enabled">
+                            <label for="obsidian-enabled">
+                                Save a note to Obsidian, after each meeting
+                            </label>
+                        </div>
+                    </form>
+
+                    <hr />
+
+                    <form id="obsidian-api-key-form" class="form-field">
+                        <label for="obsidian-api-key">API key</label>
+                        <div class="input-group">
+                            <input type="password" id="obsidian-api-key" placeholder="From the plugin settings"
+                                autocomplete="off">
+                            <button id="save-obsidian-api-key">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: 0.75rem;">
+                            Copy it from Obsidian &rarr; Settings &rarr; Local REST API. Stored on this device only, and
+                            never synced to your Google account.
+                        </p>
+                    </form>
+
+                    <hr />
+
+                    <form id="obsidian-folder-form" class="form-field">
+                        <label for="obsidian-folder">Save notes to folder</label>
+                        <div class="input-group">
+                            <input type="text" id="obsidian-folder" placeholder="Meetings">
+                            <button id="save-obsidian-folder">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: 0.75rem;">
+                            Folder inside your vault, created automatically. Leave it empty to save notes at the vault
+                            root. Each note is named <b>Meeting title 2026-09-14</b>.
+                        </p>
+                    </form>
+
+                    <hr />
+
+                    <form id="obsidian-summary-folder-form" class="form-field">
+                        <label for="obsidian-summary-folder">Save summaries to folder</label>
+                        <div class="input-group">
+                            <input type="text" id="obsidian-summary-folder" placeholder="MeetingSummary">
+                            <button id="save-obsidian-summary-folder">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: 0.75rem;">
+                            Where ChatGPT summaries are filed. Kept apart from the transcripts, and each summary links
+                            back to its full transcript note.
+                        </p>
+                    </form>
+
+                    <hr />
+
+                    <form id="obsidian-base-url-form" class="form-field">
+                        <label for="obsidian-base-url">Local REST API address</label>
+                        <div class="input-group">
+                            <input type="url" id="obsidian-base-url" placeholder="http://127.0.0.1:27123">
+                            <button id="save-obsidian-base-url">Save</button>
+                        </div>
+                        <p class="sub-text" style="margin-top: 0.75rem;">
+                            Only change this if you moved the plugin off its default port.
+                        </p>
+                    </form>
+
+                    <hr />
+
+                    <div class="form-field">
+                        <button id="test-obsidian" type="button">Test connection</button>
+                        <p id="obsidian-test-result" class="sub-text" style="margin-top: 0.75rem;"></p>
+                    </div>
                 </div>
             </div>
         </section>

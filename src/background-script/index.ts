@@ -2,6 +2,8 @@ import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, Result
 import { ALARM_NAME } from "./config"
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
+import { postTranscriptToObsidian, postSummaryToObsidian } from "./obsidian"
+import { summarizeMeeting } from "./summarizer"
 import {
     getPermissionStatus,
     requestPlatformPermission,
@@ -18,19 +20,28 @@ import {
     checkAndCreateAlarm,
     openSidePanel
 } from "./utils"
+import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER } from "@lib/paths"
+import { DEFAULT_OBSIDIAN_BASE_URL } from "./obsidian"
 
 chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendResponse) {
     const message = messageUnTyped as ExtensionMessage
     console.log(message.type)
 
     if (message.type === "new_meeting_started") {
-        // Saving current tab id, to download transcript when this tab is closed
-        chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-            const tabId = tabs[0].id
-            chrome.storage.local.set({ meetingTabId: tabId }, function () {
+        // Saving the sending tab's id, to download transcript when this tab is closed.
+        // It must come from the sender rather than a query for the active tab: the
+        // meeting tab is frequently not the focused one when the meeting starts (user
+        // switches tabs while waiting to be let in, or the call is in another window),
+        // and recording the wrong tab means the close is never intercepted.
+        const meetingTabId = sender.tab?.id
+        if (typeof meetingTabId === "number") {
+            chrome.storage.local.set({ meetingTabId: meetingTabId }, function () {
                 console.log("Meeting tab id saved")
             })
-        })
+        }
+        else {
+            console.error("new_meeting_started received without a sender tab; cannot track meeting tab")
+        }
     }
 
     if (message.type === "meeting_ended") {
@@ -96,6 +107,61 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
                     console.error("Webhook retry failed:", parsedError)
                     const response: ExtensionResponse = { success: false, message: parsedError }
                     sendResponse(response)
+                })
+        }
+        else {
+            const response: ExtensionResponse = { success: false, message: { errorCode: "015", errorMessage: "Invalid index" } }
+            sendResponse(response)
+        }
+    }
+
+    if (message.type === "post_obsidian_at_index") {
+        if ((typeof message.index === "number") && (message.index >= 0)) {
+            postTranscriptToObsidian(message.index)
+                .then(() => {
+                    const response: ExtensionResponse = { success: true }
+                    sendResponse(response)
+                })
+                .catch(error => {
+                    // Fails with error codes: 010, 017, 018, 019
+                    const parsedError = error as ErrorObject
+
+                    console.error("Obsidian save failed:", parsedError)
+                    const response: ExtensionResponse = { success: false, message: parsedError }
+                    sendResponse(response)
+                })
+        }
+        else {
+            const response: ExtensionResponse = { success: false, message: { errorCode: "015", errorMessage: "Invalid index" } }
+            sendResponse(response)
+        }
+    }
+
+    if (message.type === "summarize_at_index") {
+        if ((typeof message.index === "number") && (message.index >= 0)) {
+            const index = message.index
+            summarizeMeeting(index)
+                .then((summary) => {
+                    // Filing the summary in Obsidian is a bonus: the summary itself is
+                    // already saved, so a vault failure must not report the whole
+                    // summarise action as failed.
+                    chrome.storage.sync.get(["obsidianEnabled"], function (resultSyncUntyped) {
+                        const resultSync = resultSyncUntyped as Partial<ResultSync>
+                        if (!resultSync.obsidianEnabled) {
+                            sendResponse({ success: true, message: summary } satisfies ExtensionResponse)
+                            return
+                        }
+                        postSummaryToObsidian(index)
+                            .catch((error) => console.error("Could not save summary to Obsidian:", error))
+                            .finally(() => sendResponse({ success: true, message: summary } satisfies ExtensionResponse))
+                    })
+                })
+                .catch((error) => {
+                    // Fails with error codes: 010, 020, 021, 022
+                    const parsedError = error as ErrorObject
+
+                    console.error("Summarise failed:", parsedError)
+                    sendResponse({ success: false, message: parsedError } satisfies ExtensionResponse)
                 })
         }
         else {
@@ -310,8 +376,16 @@ chrome.runtime.onInstalled.addListener(() => {
         chrome.storage.sync.set({
             autoPostWebhookAfterMeeting: resultSync.autoPostWebhookAfterMeeting === false ? false : true,
             autoDownloadFileAfterMeeting: resultSync.autoDownloadFileAfterMeeting === false ? false : true,
+            // Only seed the default when unset — an empty string is a deliberate
+            // "save straight into Downloads" choice and must survive updates.
+            downloadSubfolder: typeof resultSync.downloadSubfolder === "string" ? resultSync.downloadSubfolder : DEFAULT_DOWNLOAD_SUBFOLDER,
+            obsidianEnabled: resultSync.obsidianEnabled === true ? true : false,
+            obsidianFolder: typeof resultSync.obsidianFolder === "string" ? resultSync.obsidianFolder : DEFAULT_OBSIDIAN_FOLDER,
+            obsidianSummaryFolder: typeof resultSync.obsidianSummaryFolder === "string" ? resultSync.obsidianSummaryFolder : DEFAULT_OBSIDIAN_SUMMARY_FOLDER,
+            obsidianBaseUrl: typeof resultSync.obsidianBaseUrl === "string" && resultSync.obsidianBaseUrl ? resultSync.obsidianBaseUrl : DEFAULT_OBSIDIAN_BASE_URL,
             operationMode: resultSync.operationMode === "manual" ? "manual" : "auto",
             hideCaptions: resultSync.hideCaptions === true ? true : false,
+            participantName: typeof resultSync.participantName === "string" ? resultSync.participantName : "",
             webhookBodyType: resultSync.webhookBodyType === "advanced" ? "advanced" : "simple",
             wantGoogleMeet: resultSync.wantGoogleMeet === false ? false : true,
             wantTeams: resultSync.wantTeams === true ? true : false,

@@ -1,8 +1,10 @@
 import type { ChatMessage, ContentScriptState, ErrorObject, ExtensionMessage, ResultSync } from "@lib/types"
 import { extensionStatusJSON_bug, mutationConfig, reportErrorMessage } from "../common-config"
 import {
+    applyParticipantNameSetting,
     broadcastLiveBuffer,
     checkExtensionStatus,
+    clearLiveBuffer,
     createContentScriptState,
     logError,
     overWriteChromeStorage,
@@ -16,7 +18,7 @@ import {
     waitForElement,
 } from "../common-utils"
 import { SELECTORS_GOOGLE_MEET } from "./config"
-import { captureUserName, pushUniqueChatBlock, selectElements, showNotificationGoogleMeet } from "./utils"
+import { captureUserName, pushUniqueChatBlock, selectControlButton, selectElements, showNotificationGoogleMeet } from "./utils"
 
 export function initGoogleMeet(): void {
     // Attempt to recover last meeting, if any. Abort if it takes more than 15 seconds to prevent current meeting getting messed up.
@@ -33,8 +35,11 @@ export function initGoogleMeet(): void {
     }).finally(() => {
         // Initialise new state for current meeting
         const state = createContentScriptState("Google Meet", "google_meet")
+        applyParticipantNameSetting(state)
         // Push fresh state to chrome storage
         overWriteChromeStorage(state, ["meetingSoftware", "meetingStartTimestamp", "meetingTitle", "transcript", "chatMessages"], false)
+        // Drop any buffer left over from a meeting that was never picked up
+        clearLiveBuffer()
 
         checkExtensionStatus(state).finally(() => {
             console.log("Extension status " + state.extensionStatusJSON.status)
@@ -80,7 +85,7 @@ function googleMeetRoutines(state: ContentScriptState): void {
         waitForElement(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS)
             .then(() => {
                 // CRITICAL DOM DEPENDENCY
-                const captionsButton = selectElements(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS)[0]
+                const captionsButton = selectControlButton(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CAPTIONS)
 
                 // Click captions icon for non manual operation modes. Async operation.
                 chrome.storage.sync.get(["operationMode"], function (resultSyncUntyped) {
@@ -89,7 +94,7 @@ function googleMeetRoutines(state: ContentScriptState): void {
                         console.log("Manual mode selected, leaving transcript off")
                     }
                     else {
-                        captionsButton.click()
+                        captionsButton?.click()
                     }
                 })
 
@@ -132,9 +137,9 @@ function googleMeetRoutines(state: ContentScriptState): void {
         // Wait for chat icon to be visible. When user is waiting in meeting lobbing for someone to let them in, the call end icon is visible, but the chat icon is still not visible.
         waitForElement(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CHAT)
             .then(() => {
-                const chatMessagesButton = selectElements(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CHAT)[0]
+                const chatMessagesButton = selectControlButton(SELECTORS_GOOGLE_MEET.GOOGLE_SYMBOLS, SELECTORS_GOOGLE_MEET.TEXT_CHAT)
                 // Force open chat messages to make the required DOM to appear. Otherwise, the required chatMessages DOM element is not available.
-                chatMessagesButton.click()
+                chatMessagesButton?.click()
 
                 // Allow DOM to be updated. Once updated, next "then" block will be executed.
                 return waitForElement(SELECTORS_GOOGLE_MEET.CHAT_LIVE_REGION)
@@ -142,7 +147,7 @@ function googleMeetRoutines(state: ContentScriptState): void {
             })
             .then(({ targetNode, chatMessagesButton }) => {
                 // Click again to close the chat messages
-                chatMessagesButton.click()
+                chatMessagesButton?.click()
                 // CRITICAL DOM DEPENDENCY. Grab the chat messages element. This element is present, irrespective of chat ON/OFF, once it appears for this first time.
                 state.chatMessagesTargetNode = targetNode
 
@@ -152,6 +157,8 @@ function googleMeetRoutines(state: ContentScriptState): void {
                         chatMessagesMutationCallback(state, mutations)
                     )
                     state.chatMessagesObserver.observe(state.chatMessagesTargetNode, mutationConfig)
+                    // Messages sent before the observer attached are already in the DOM
+                    captureChatMessages(state)
                 }
                 else {
                     throw new Error("Chat messages element not found in DOM")
@@ -183,6 +190,9 @@ function googleMeetRoutines(state: ContentScriptState): void {
 
                 // Push any data in the buffer variables to the transcript array. Needed to handle one or more speaking when meeting ends.
                 pushBufferToTranscript(state)
+                // Final sweep, so anything the observer missed while the chat panel was
+                // closed is still picked up before the meeting is filed
+                captureChatMessages(state)
                 // Save to chrome storage and send message to download transcript from background script
                 overWriteChromeStorage(state, ["transcript", "chatMessages"], true)
 
@@ -280,44 +290,96 @@ function transcriptMutationCallbackGoogleMeet(state: ContentScriptState, mutatio
     })
 }
 
+/**
+ * Reads every chat message currently in the DOM and stores any not seen before.
+ *
+ * The previous implementation read only the single newest message on each mutation,
+ * which silently dropped whole batches: Google Meet renders a run of messages at once
+ * when the chat panel is opened, and two messages arriving between mutation callbacks
+ * would leave only the last one. Sweeping the whole region and de-duplicating on
+ * data-message-id captures all of them, and makes the sweep safe to repeat.
+ */
+export function captureChatMessages(state: ContentScriptState): void {
+    try {
+        // CRITICAL DOM DEPENDENCY
+        const chatMessagesElement = document.querySelector(SELECTORS_GOOGLE_MEET.CHAT_LIVE_REGION)
+        if (!chatMessagesElement) {
+            return
+        }
+
+        // Each run of consecutive messages from one person is a group with its own header
+        for (const group of Array.from(chatMessagesElement.children)) {
+            const header = group.querySelector(SELECTORS_GOOGLE_MEET.CHAT_GROUP_HEADER)
+            // Own messages show only a timestamp; everyone else gets a name first
+            const personName = (header && header.childNodes.length > 1)
+                ? (header.firstChild?.textContent ?? state.userName)
+                : state.userName
+
+            const seenInGroup = new Set<string>()
+            for (const messageElement of Array.from(group.querySelectorAll(SELECTORS_GOOGLE_MEET.CHAT_MESSAGE))) {
+                const messageId = messageElement.getAttribute("data-message-id")
+                // The id is repeated on nested elements; only the outermost is the message
+                if (!messageId || seenInGroup.has(messageId)) {
+                    continue
+                }
+                seenInGroup.add(messageId)
+
+                if (state.capturedChatMessageIds.includes(messageId)) {
+                    continue
+                }
+
+                const chatMessageText = getChatMessageText(messageElement)
+                if (!chatMessageText) {
+                    continue
+                }
+
+                state.capturedChatMessageIds.push(messageId)
+                pushUniqueChatBlock(state, {
+                    personName: personName,
+                    timestamp: new Date().toISOString(),
+                    chatMessageText: chatMessageText
+                })
+            }
+        }
+    }
+    catch (err) {
+        console.error(err)
+        if (!state.isChatMessagesDomErrorCaptured && !state.hasMeetingEnded) {
+            console.log(reportErrorMessage)
+            showNotificationGoogleMeet(extensionStatusJSON_bug)
+
+            logError(state, "006", err)
+        }
+        state.isChatMessagesDomErrorCaptured = true
+    }
+}
+
+/**
+ * Pulls the message body out of a chat message element.
+ *
+ * The element also contains hover controls ("keep", "Pin message"), so its innerText
+ * cannot be used directly. The body is the first element branch; the controls sit in a
+ * sibling that always contains a button, which is what the fallback strips.
+ */
+function getChatMessageText(messageElement: Element): string {
+    const bodyElement = messageElement.firstElementChild?.firstElementChild?.firstElementChild
+    const body = (bodyElement as HTMLElement | null | undefined)?.innerText?.trim()
+    if (body) {
+        return body
+    }
+
+    // Structure changed: drop anything holding a control and take what is left
+    const clone = messageElement.cloneNode(true) as HTMLElement
+    Array.from(clone.querySelectorAll("button")).forEach(button => {
+        const container = button.parentElement?.parentElement ?? button
+        container.remove()
+    })
+    return (clone.innerText || "").trim()
+}
+
 /** Callback function to execute when chat messages mutations are observed. */
 function chatMessagesMutationCallback(state: ContentScriptState, mutationsList: MutationRecord[]): void {
-    mutationsList.forEach(() => {
-        try {
-            // CRITICAL DOM DEPENDENCY
-            const chatMessagesElement = document.querySelector(SELECTORS_GOOGLE_MEET.CHAT_LIVE_REGION)
-            // Attempt to parse messages only if at least one message exists
-            if (chatMessagesElement && chatMessagesElement.children.length > 0) {
-                // CRITICAL DOM DEPENDENCY. Get the last message that was sent/received.
-                const chatMessageElement = chatMessagesElement.lastChild?.firstChild?.firstChild?.lastChild
-                // CRITICAL DOM DEPENDENCY
-                const personAndTimestampElement = chatMessageElement?.firstChild
-                const personName = personAndTimestampElement?.childNodes.length === 1 ? state.userName : personAndTimestampElement?.firstChild?.textContent
-                const timestamp = new Date().toISOString()
-                // CRITICAL DOM DEPENDENCY
-                const chatMessageText = chatMessageElement?.lastChild?.lastChild?.firstChild?.firstChild?.firstChild?.textContent
-
-                if (personName && chatMessageText) {
-                    const chatMessageBlock: ChatMessage = {
-                        "personName": personName,
-                        "timestamp": timestamp,
-                        "chatMessageText": chatMessageText
-                    }
-
-                    // Lot of mutations fire for each message, pick them only once
-                    pushUniqueChatBlock(state, chatMessageBlock)
-                }
-            }
-        }
-        catch (err) {
-            console.error(err)
-            if (!state.isChatMessagesDomErrorCaptured && !state.hasMeetingEnded) {
-                console.log(reportErrorMessage)
-                showNotificationGoogleMeet(extensionStatusJSON_bug)
-
-                logError(state, "006", err)
-            }
-            state.isChatMessagesDomErrorCaptured = true
-        }
-    })
+    if (mutationsList.length > 0) {
+        captureChatMessages(state)
+    }
 }

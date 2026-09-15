@@ -2,10 +2,10 @@ import type { ExtensionStatusJSON, Platform } from "@lib/types"
 
 export const extensionStatusJSON_bug: ExtensionStatusJSON = {
     "status": 400,
-    "message": `<strong>TranscripTonic encountered a new error</strong> <br /> Please report it <a href="https://github.com/vivek-nexus/transcriptonic/issues" target="_blank">here</a>.`
+    "message": `<strong>TranscripTonic encountered a new error</strong> <br /> Please report it <a href="https://github.com/numandev/transcriptonic/issues" target="_blank">here</a>.`
 }
 
-export const reportErrorMessage = "There is a bug in TranscripTonic. Please report it at https://github.com/vivek-nexus/transcriptonic/issues"
+export const reportErrorMessage = "There is a bug in TranscripTonic. Please report it at https://github.com/numandev/transcriptonic/issues"
 
 export const LOG_ERROR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz0VFUYIke1WK12Q-8y-zQ91bOPRZ8dAL4cRpm309IYZO0k6uYDkTSlfbWFaGvUV_Z-JQ/exec"
 
