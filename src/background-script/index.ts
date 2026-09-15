@@ -1,7 +1,7 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, ResultLocal, ResultSync } from "@lib/types"
 import { ALARM_NAME } from "./config"
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
-import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
+import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian } from "./obsidian"
 import { summarizeMeeting } from "./summarizer"
 import {
@@ -18,10 +18,14 @@ import {
     clearTabIdAndApplyUpdate,
     openExtensionPopup,
     checkAndCreateAlarm,
-    openSidePanel
+    openSidePanel,
+    captureAccountEmail
 } from "./utils"
 import { DEFAULT_DOWNLOAD_SUBFOLDER, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER } from "@lib/paths"
 import { DEFAULT_OBSIDIAN_BASE_URL } from "./obsidian"
+
+// Registered at the top level so it is in place on every service worker wake
+registerDownloadFilenameGuard()
 
 chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendResponse) {
     const message = messageUnTyped as ExtensionMessage
@@ -35,9 +39,12 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
         // and recording the wrong tab means the close is never intercepted.
         const meetingTabId = sender.tab?.id
         if (typeof meetingTabId === "number") {
-            chrome.storage.local.set({ meetingTabId: meetingTabId }, function () {
+            // Clear the previous meeting's account before reading this one, so a failed
+            // read cannot file this meeting under the wrong account.
+            chrome.storage.local.set({ meetingTabId: meetingTabId, accountEmail: undefined }, function () {
                 console.log("Meeting tab id saved")
             })
+            captureAccountEmail(meetingTabId)
         }
         else {
             console.error("new_meeting_started received without a sender tab; cannot track meeting tab")
@@ -115,6 +122,22 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
         }
     }
 
+    if (message.type === "download_summary_at_index") {
+        if ((typeof message.index === "number") && (message.index >= 0)) {
+            downloadSummary(message.index)
+                .then(() => sendResponse({ success: true } satisfies ExtensionResponse))
+                .catch((error) => {
+                    // Fails with error codes: 009, 010, 022
+                    const parsedError = error as ErrorObject
+                    sendResponse({ success: false, message: parsedError } satisfies ExtensionResponse)
+                })
+        }
+        else {
+            const response: ExtensionResponse = { success: false, message: { errorCode: "015", errorMessage: "Invalid index" } }
+            sendResponse(response)
+        }
+    }
+
     if (message.type === "post_obsidian_at_index") {
         if ((typeof message.index === "number") && (message.index >= 0)) {
             postTranscriptToObsidian(message.index)
@@ -145,15 +168,24 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
                     // Filing the summary in Obsidian is a bonus: the summary itself is
                     // already saved, so a vault failure must not report the whole
                     // summarise action as failed.
-                    chrome.storage.sync.get(["obsidianEnabled"], function (resultSyncUntyped) {
+                    chrome.storage.sync.get(["obsidianEnabled", "autoDownloadFileAfterMeeting"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
-                        if (!resultSync.obsidianEnabled) {
-                            sendResponse({ success: true, message: summary } satisfies ExtensionResponse)
-                            return
+
+                        // Saving the file and filing it in Obsidian are both bonuses: the
+                        // summary is already stored, so neither failing may report the
+                        // summarise action itself as failed.
+                        const followUps: Promise<unknown>[] = []
+                        if (resultSync.autoDownloadFileAfterMeeting !== false) {
+                            followUps.push(downloadSummary(index)
+                                .catch((error) => console.error("Could not save the summary file:", error)))
                         }
-                        postSummaryToObsidian(index)
-                            .catch((error) => console.error("Could not save summary to Obsidian:", error))
-                            .finally(() => sendResponse({ success: true, message: summary } satisfies ExtensionResponse))
+                        if (resultSync.obsidianEnabled) {
+                            followUps.push(postSummaryToObsidian(index)
+                                .catch((error) => console.error("Could not save summary to Obsidian:", error)))
+                        }
+
+                        Promise.all(followUps).finally(() =>
+                            sendResponse({ success: true, message: summary } satisfies ExtensionResponse))
                     })
                 })
                 .catch((error) => {

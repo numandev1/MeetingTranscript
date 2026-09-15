@@ -43,3 +43,19 @@ export function getFolderPrefix(subfolder: string | undefined, defaultFolder: st
 
     return `${segments.join("/")}/`
 }
+
+/**
+ * Nests a folder prefix under the account the meeting was attended from, so meetings
+ * from different accounts are filed separately.
+ *
+ * Returns the prefix untouched when the account is unknown, which is the case on
+ * platforms where it cannot be read and on meetings recorded before this existed.
+ */
+export function withAccountSubfolder(folderPrefix: string, accountEmail: string | undefined): string {
+    if (!accountEmail) {
+        return folderPrefix
+    }
+    // Reuse the same sanitising rules; an address only ever contributes one segment
+    const accountSegment = getFolderPrefix(accountEmail, "")
+    return `${folderPrefix}${accountSegment}`
+}

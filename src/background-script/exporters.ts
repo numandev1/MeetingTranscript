@@ -3,6 +3,48 @@ import { getTranscriptString, getChatMessagesString } from "./utils"
 import { getFolderPrefix, DEFAULT_DOWNLOAD_SUBFOLDER } from "@lib/paths"
 import { TIMEFORMAT } from "./config"
 
+/**
+ * Filenames this extension has asked for, in request order, each awaiting its
+ * onDeterminingFilename event.
+ */
+const pendingDownloadFilenames: string[] = []
+
+/**
+ * Starts a download and records the intended filename so the guard below can re-assert it.
+ *
+ * Passing `filename` to downloads.download() is only a *suggestion*: any extension
+ * holding the downloads permission can rewrite it from onDeterminingFilename. A download
+ * manager doing exactly that is why transcripts were landing in the Downloads root as
+ * "download (N).txt" instead of the configured folder.
+ */
+function startDownload(filename: string, url: string): Promise<number> {
+    pendingDownloadFilenames.push(filename)
+    return chrome.downloads.download({ url, filename, conflictAction: "uniquify" })
+}
+
+/**
+ * Re-asserts our own filename for downloads this extension started.
+ *
+ * Chrome awards a contested filename to the most recently installed extension that calls
+ * suggest(), so registering here is what lets the configured folder survive another
+ * extension's rewrite. Downloads started by anything else are left alone.
+ */
+export function registerDownloadFilenameGuard(): void {
+    if (!chrome.downloads.onDeterminingFilename) {
+        return
+    }
+    chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+        if (item.byExtensionId !== chrome.runtime.id) {
+            return
+        }
+        const intendedFilename = pendingDownloadFilenames.shift()
+        if (!intendedFilename) {
+            return
+        }
+        suggest({ filename: intendedFilename, conflictAction: "uniquify" })
+    })
+}
+
 /** @throws error codes: 009, 010 */
 export function downloadTranscript(index: number, isWebhookEnabled?: boolean): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -56,20 +98,12 @@ export function downloadTranscript(index: number, isWebhookEnabled?: boolean): P
                             const dataUrl = event.target.result as string
 
                             // Create a download with Chrome Download API
-                            chrome.downloads.download({
-                                url: dataUrl,
-                                filename: fileName,
-                                conflictAction: "uniquify"
-                            }).then(() => {
+                            startDownload(fileName, dataUrl).then(() => {
                                 console.log("Transcript downloaded")
                                 resolve("Transcript downloaded successfully")
                             }).catch((err) => {
                                 console.error(err)
-                                chrome.downloads.download({
-                                    url: dataUrl,
-                                    filename: `${folderPrefix}Transcript.txt`,
-                                    conflictAction: "uniquify"
-                                })
+                                startDownload(`${folderPrefix}Transcript.txt`, dataUrl)
                                 console.log("Invalid file name. Transcript downloaded to the configured directory with simple file name.")
                                 resolve("Transcript downloaded successfully with default file name")
 
@@ -179,6 +213,76 @@ export function postTranscriptToWebhook(index: number): Promise<string> {
                 else {
                     const error: ErrorObject = { errorCode: "012", errorMessage: "No webhook URL configured" }
                     reject(error)
+                }
+            })
+        })
+    })
+}
+
+/**
+ * Saves the summary as its own text file, alongside the transcript file and in the same
+ * configured folder.
+ *
+ * @throws error codes: 009, 010, 022
+ */
+export function downloadSummary(index: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
+            const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+
+            chrome.storage.sync.get(["downloadSubfolder"], function (resultSyncUntyped) {
+                const resultSync = resultSyncUntyped as Partial<ResultSync>
+                const folderPrefix = getFolderPrefix(resultSync.downloadSubfolder, DEFAULT_DOWNLOAD_SUBFOLDER)
+
+                const meeting = resultLocal.meetings?.[index]
+                if (!meeting) {
+                    reject({ errorCode: "010", errorMessage: "Meeting at specified index not found" } satisfies ErrorObject)
+                    return
+                }
+                if (!meeting.summary) {
+                    reject({ errorCode: "022", errorMessage: "Nothing to summarise for this meeting" } satisfies ErrorObject)
+                    return
+                }
+
+                // Same sanitising as the transcript file
+                // https://stackoverflow.com/a/78675894
+                const invalidFilenameRegex = /[:?"*<>|~/\\\u{1}-\u{1f}\u{7f}\u{80}-\u{9f}\p{Cf}\p{Cn}]|^[.\u{0}\p{Zl}\p{Zp}\p{Zs}]|[.\u{0}\p{Zl}\p{Zp}\p{Zs}]$|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?=\.|$)/gui
+                let sanitisedMeetingTitle = "Meeting"
+                if (meeting.meetingTitle) {
+                    sanitisedMeetingTitle = meeting.meetingTitle.replaceAll(invalidFilenameRegex, "_")
+                }
+                else if (meeting.title) {
+                    sanitisedMeetingTitle = meeting.title.replaceAll(invalidFilenameRegex, "_")
+                }
+
+                const formattedTimestamp = new Date(meeting.meetingStartTimestamp)
+                    .toLocaleString("default", TIMEFORMAT).replace(/[\/:]/g, "-")
+
+                const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} summary` : "Summary"
+                const fileName = `${folderPrefix}${prefix}-${sanitisedMeetingTitle} at ${formattedTimestamp}.txt`
+
+                let content = `${meeting.meetingTitle || meeting.title || "Meeting"}\n`
+                content += `${new Date(meeting.meetingStartTimestamp).toLocaleString("default", TIMEFORMAT).toUpperCase()}\n\n`
+                content += `${meeting.summary.trim()}\n`
+
+                const reader = new FileReader()
+                reader.readAsDataURL(new Blob([content], { type: "text/plain" }))
+                reader.onload = function (event) {
+                    if (!event.target?.result) {
+                        reject({ errorCode: "009", errorMessage: "Failed to read blob" } satisfies ErrorObject)
+                        return
+                    }
+                    const dataUrl = event.target.result as string
+
+                    startDownload(fileName, dataUrl).then(() => {
+                        console.log("Summary downloaded")
+                        resolve("Summary downloaded successfully")
+                    }).catch((err) => {
+                        console.error(err)
+                        // Fall back to a plain name, exactly as the transcript download does
+                        startDownload(`${folderPrefix}Summary.txt`, dataUrl)
+                        resolve("Summary downloaded successfully with default file name")
+                    })
                 }
             })
         })

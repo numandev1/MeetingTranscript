@@ -71,6 +71,12 @@ export interface Meeting {
   webhookPostStatus: "new" | "failed" | "successful"
   /** Undefined for meetings recorded before the Obsidian integration existed. */
   obsidianPostStatus?: "new" | "failed" | "successful"
+  /**
+   * Account the meeting was attended from, used to file notes per account.
+   * Undefined on platforms where it cannot be determined, and on meetings recorded
+   * before this existed.
+   */
+  accountEmail?: string
   /** Summary produced by ChatGPT, as markdown. */
   summary?: string
   summaryStatus?: "new" | "failed" | "successful"
@@ -122,6 +128,7 @@ export type ExtensionMessageType =
   | "post_webhook_at_index"
   | "post_obsidian_at_index"
   | "summarize_at_index"
+  | "download_summary_at_index"
   | "recover_last_meeting"
   | "get_platform_enablement_status"
   | "get_platform_permission_status"
@@ -171,6 +178,8 @@ export interface ResultLocal {
    * pickupLastMeetingFromStorage() if the content script never got to flush it.
    */
   liveTranscriptBlock: TranscriptBlock | null | undefined
+  /** Account the in-progress meeting is being attended from. */
+  accountEmail: string | undefined
   /** Whether the extension has a deferred update waiting to be applied. */
   isDeferredUpdatedAvailable: boolean | undefined
   meetings: Meeting[] | undefined

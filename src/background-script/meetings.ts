@@ -110,6 +110,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
             "transcript",
             "chatMessages",
             "liveTranscriptBlock",
+            "accountEmail",
         ], function (resultUntyped) {
             const result = resultUntyped as Partial<ResultLocal>
 
@@ -121,6 +122,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                     // Create new transcript entry
                     const newMeetingEntry: Meeting = {
                         meetingSoftware: result.meetingSoftware ? result.meetingSoftware : "",
+                        accountEmail: result.accountEmail,
                         meetingTitle: result.meetingTitle,
                         meetingStartTimestamp: result.meetingStartTimestamp,
                         meetingEndTimestamp: new Date().toISOString(),

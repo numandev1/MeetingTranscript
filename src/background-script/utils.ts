@@ -145,3 +145,45 @@ export function checkPermissionsAndOpenMeetingsPage(): void {
         })
     })
 }
+
+/**
+ * Reads the Google account the meeting is being attended from, out of the meeting tab.
+ *
+ * The address is not in the DOM as its own text node, but Google's page config object
+ * carries it. That object is a page global, invisible to a content script's isolated
+ * world, so this runs in the MAIN world from the background instead.
+ *
+ * Values are scanned rather than a fixed key being read, because the key is obfuscated
+ * and Google rotates those; an address is only accepted when exactly one distinct
+ * candidate is present, so a participant's address can never be mistaken for the user's.
+ */
+export function captureAccountEmail(tabId: number): void {
+    chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => {
+            const emailPattern = /^[\w.+-]+@[\w.-]+\.[a-z]{2,}$/i
+            const pageData = (globalThis as unknown as { WIZ_global_data?: Record<string, unknown> }).WIZ_global_data
+            if (!pageData) {
+                return undefined
+            }
+            const candidates = [...new Set(
+                Object.values(pageData)
+                    .filter((value): value is string => typeof value === "string")
+                    .map(value => value.trim())
+                    .filter(value => emailPattern.test(value))
+            )]
+            return candidates.length === 1 ? candidates[0] : undefined
+        }
+    }).then((results) => {
+        const accountEmail = results?.[0]?.result
+        if (accountEmail) {
+            chrome.storage.local.set({ accountEmail: accountEmail }, function () {
+                console.log("Meeting account captured")
+            })
+        }
+    }).catch((error) => {
+        // Not fatal: notes simply stay in the top level folder
+        console.log("Could not determine the meeting account:", error)
+    })
+}

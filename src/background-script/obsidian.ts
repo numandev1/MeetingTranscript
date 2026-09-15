@@ -1,5 +1,5 @@
 import type { ErrorObject, Meeting, ResultLocal, ResultSync } from "@lib/types"
-import { DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER, getFolderPrefix } from "@lib/paths"
+import { DEFAULT_OBSIDIAN_FOLDER, DEFAULT_OBSIDIAN_SUMMARY_FOLDER, getFolderPrefix, withAccountSubfolder } from "@lib/paths"
 import { TIMEFORMAT } from "./config"
 
 export const DEFAULT_OBSIDIAN_BASE_URL = "http://127.0.0.1:27123"
@@ -117,7 +117,8 @@ export function getObsidianSummaryMarkdown(meeting: Meeting, summary: string): s
     note += "---\n\n"
 
     note += `# ${title}\n\n`
-    // Wiki link to the transcript note, which uses the same name in its own folder
+    // Wiki link to the transcript note. A bare name resolves regardless of which
+    // account subfolder each note ended up in.
     note += `Full transcript: [[${getObsidianNoteName(meeting)}]]\n\n`
     note += `${summary.trim()}\n`
 
@@ -147,7 +148,10 @@ export function postSummaryToObsidian(index: number): Promise<string> {
                 }
 
                 const meeting = meetings[index]
-                const folderPrefix = getFolderPrefix(resultSync.obsidianSummaryFolder, DEFAULT_OBSIDIAN_SUMMARY_FOLDER)
+                const folderPrefix = withAccountSubfolder(
+                    getFolderPrefix(resultSync.obsidianSummaryFolder, DEFAULT_OBSIDIAN_SUMMARY_FOLDER),
+                    meeting.accountEmail
+                )
 
                 putVaultNote(
                     resultSync.obsidianBaseUrl,
@@ -222,7 +226,10 @@ export function postTranscriptToObsidian(index: number): Promise<string> {
 
                 const meeting = meetings[index]
                 const baseUrl = (resultSync.obsidianBaseUrl || DEFAULT_OBSIDIAN_BASE_URL).replace(/\/+$/, "")
-                const folderPrefix = getFolderPrefix(resultSync.obsidianFolder, DEFAULT_OBSIDIAN_FOLDER)
+                const folderPrefix = withAccountSubfolder(
+                    getFolderPrefix(resultSync.obsidianFolder, DEFAULT_OBSIDIAN_FOLDER),
+                    meeting.accountEmail
+                )
                 // Each path segment is encoded separately so the folder separators survive
                 const vaultPath = `${folderPrefix}${getObsidianNoteName(meeting)}.md`
                     .split("/")

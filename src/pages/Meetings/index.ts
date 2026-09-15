@@ -248,7 +248,7 @@ function requestWebhookAndNotificationPermission(url: string): Promise<string> {
  * transcript text is captured verbatim from the meeting UI and must never be parsed
  * as markup here.
  */
-function openTranscriptDialog(meeting: Meeting, index: number): void {
+function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcript" | "summary" = "transcript"): void {
     const dialog = document.querySelector<HTMLDialogElement>("#transcript-dialog")
     const titleElement = document.querySelector<HTMLElement>("#transcript-dialog-title")
     const metaElement = document.querySelector<HTMLElement>("#transcript-dialog-meta")
@@ -261,7 +261,8 @@ function openTranscriptDialog(meeting: Meeting, index: number): void {
         return
     }
 
-    titleElement.textContent = meeting.meetingTitle || meeting.title || "Meeting"
+    const meetingName = meeting.meetingTitle || meeting.title || "Meeting"
+    titleElement.textContent = focus === "summary" ? `${meetingName} — summary` : meetingName
     metaElement.textContent = [
         meeting.meetingSoftware,
         new Date(meeting.meetingStartTimestamp).toLocaleString(),
@@ -278,6 +279,12 @@ function openTranscriptDialog(meeting: Meeting, index: number): void {
         summaryElement.className = "dialog-block-text"
         summaryElement.textContent = meeting.summary
         bodyElement.appendChild(summaryElement)
+    }
+    else if (focus === "summary") {
+        const empty = document.createElement("p")
+        empty.className = "sub-text"
+        empty.textContent = "This meeting has not been summarised yet."
+        bodyElement.appendChild(empty)
     }
     bodyElement.appendChild(buildSection("Transcript", meeting.transcript.map(block => ({
         personName: block.personName,
@@ -307,7 +314,8 @@ function openTranscriptDialog(meeting: Meeting, index: number): void {
     if (copyButton) {
         copyButton.textContent = "Copy"
         copyButton.onclick = () => {
-            navigator.clipboard.writeText(getPlainText(meeting)).then(() => {
+            const toCopy = (focus === "summary" && meeting.summary) ? meeting.summary : getPlainText(meeting)
+            navigator.clipboard.writeText(toCopy).then(() => {
                 copyButton.textContent = "Copied!"
             }).catch((error) => {
                 copyButton.textContent = "Copy failed"
@@ -316,12 +324,17 @@ function openTranscriptDialog(meeting: Meeting, index: number): void {
         }
     }
     if (downloadButton) {
+        const wantsSummary = (focus === "summary") && !!meeting.summary
+        downloadButton.textContent = wantsSummary ? "Download summary" : "Download"
         downloadButton.onclick = () => {
-            const message: ExtensionMessage = { type: "download_transcript_at_index", index: index }
+            const message: ExtensionMessage = {
+                type: wantsSummary ? "download_summary_at_index" : "download_transcript_at_index",
+                index: index
+            }
             chrome.runtime.sendMessage(message, (responseUntyped) => {
                 const response = responseUntyped as ExtensionResponse
                 if (!response.success) {
-                    alert("Could not download transcript")
+                    alert(wantsSummary ? "Could not download summary" : "Could not download transcript")
                 }
             })
         }
@@ -635,6 +648,9 @@ function loadMeetings(): void {
                             <button class="view-button" data-index="${i}" title="View transcript" aria-label="View this meeting transcript">
                                 <img src="./icons/view.svg" alt="">
                             </button>
+                            ${meeting.summary ? `<button class="view-summary-button" data-index="${i}" title="View summary" aria-label="View this meeting summary">
+                                Summary
+                            </button>` : ``}
                             <button class="summarize-button" data-index="${i}" title="${meeting.summary ? `Re-summarise with ChatGPT` : `Summarise with ChatGPT`}" aria-label="Summarise this meeting with ChatGPT">
                                 ${meeting.summary ? `Re-summarise` : `Summarise`}
                             </button>
@@ -674,6 +690,14 @@ function loadMeetings(): void {
                     if (viewButton instanceof HTMLButtonElement) {
                         viewButton.addEventListener("click", function () {
                             openTranscriptDialog(meeting, i)
+                        })
+                    }
+
+                    // Add event listener to the view summary button
+                    const viewSummaryButton = row.querySelector(".view-summary-button")
+                    if (viewSummaryButton instanceof HTMLButtonElement) {
+                        viewSummaryButton.addEventListener("click", function () {
+                            openTranscriptDialog(meeting, i, "summary")
                         })
                     }
 
