@@ -7,11 +7,10 @@ export const extensionStatusJSON_bug: ExtensionStatusJSON = {
 
 export const reportErrorMessage = "There is a bug in MeetingTranscript. Please report it at https://github.com/numandev/transcriptonic/issues"
 
-export const LOG_ERROR_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz0VFUYIke1WK12Q-8y-zQ91bOPRZ8dAL4cRpm309IYZO0k6uYDkTSlfbWFaGvUV_Z-JQ/exec"
-
 export const mutationConfig: MutationObserverInit = { childList: true, attributes: true, subtree: true, characterData: true }
 
-export const LOGO_URL = "https://ejnana.github.io/transcripto-status/icon.png"
+// Bundled, so a meeting banner never fetches an image from a third party
+export const LOGO_URL = chrome.runtime.getURL("icon.png")
 
 export const commonCSS = `background: rgb(255 255 255 / 100%); 
     backdrop-filter: blur(16px); 
@@ -33,17 +32,14 @@ export const commonCSS = `background: rgb(255 255 255 / 100%);
     font-family: "Google Sans",Roboto,Arial,sans-serif; 
     box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;`
 
-export const NOTIFICATION_PLATFORM_CONFIGS: Record<Platform, { notificationText: string, statusUrl: string }> = {
+export const NOTIFICATION_PLATFORM_CONFIGS: Record<Platform, { notificationText: string }> = {
     "google_meet": {
-        notificationText: "<strong>MeetingTranscript is running</strong> <br /> Do not turn off captions",
-        statusUrl: "https://ejnana.github.io/transcripto-status/status-prod-meet.json"
+        notificationText: "<strong>MeetingTranscript is running</strong> <br /> Do not turn off captions"
     },
     "teams": {
-        notificationText: "<b>MeetingTranscript is ready, enabling captions...</b> <br /> Please enable manually if not successful (More > Captions)",
-        statusUrl: "https://ejnana.github.io/transcripto-status/status-prod-teams.json"
+        notificationText: "<b>MeetingTranscript is ready, enabling captions...</b> <br /> Please enable manually if not successful (More > Captions)"
     },
     "zoom": {
-        notificationText: "MeetingTranscript is ready <br /> <b>Please switch on Zoom captions to begin (More > Captions)</b>",
-        statusUrl: "https://ejnana.github.io/transcripto-status/status-prod-zoom.json"
+        notificationText: "MeetingTranscript is ready <br /> <b>Please switch on Zoom captions to begin (More > Captions)</b>"
     }
 }

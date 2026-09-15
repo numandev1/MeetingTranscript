@@ -107,8 +107,6 @@ export function downloadTranscript(index: number, isWebhookEnabled?: boolean): P
                                 console.log("Invalid file name. Transcript downloaded to the configured directory with simple file name.")
                                 resolve("Transcript downloaded successfully with default file name")
 
-                                // Logs anonymous errors to a Google sheet for swift debugging
-                                fetch(`https://script.google.com/macros/s/AKfycbz0VFUYIke1WK12Q-8y-zQ91bOPRZ8dAL4cRpm309IYZO0k6uYDkTSlfbWFaGvUV_Z-JQ/exec?version=${chrome.runtime.getManifest().version}&code=009&error=${encodeURIComponent(err)}&meetingSoftware=${meeting.meetingSoftware}`, { mode: "no-cors" })
                             })
                         }
                         else {

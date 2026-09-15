@@ -1,107 +1,104 @@
 # MeetingTranscript
-Simple Google Meet transcripts. Private and open source. 
-> Teams and Zoom transcripts in beta. <a href="https://github.com/numandev/transcriptonic/wiki/Zoom-and-Teams-beta-testing" target="_blank">Learn
-          more</a>.
 
-![marquee-large](/assets/marquee-large.png)
+Private meeting transcripts for Google Meet, Microsoft Teams and Zoom. Everything is captured and stored on your own machine.
 
-Extension status: 🟢 OPERATIONAL (v3.4.3)
+> Teams and Zoom support is in beta.
 
-<br />
-<br />
-
-
-
-# Demo
-View video on [YouTube](https://www.youtube.com/watch?v=ARL6HbkakX4)
-
-![demo](/assets/demo.gif)
-
+![The meetings page](/assets/screenshot-meetings.png)
 
 <br />
-<br />
 
+# What it does
 
-# Installation
-<a href="https://chromewebstore.google.com/detail/ciepnfnceimjehngolkijpnbappkkiag" target="_blank">
-    <img src="https://developer.chrome.com/static/docs/webstore/branding/image/iNEddTyWiMfLSwFD6qGq.png" />
-</a>
-
-<br />
-<br />
-
-# How to use MeetingTranscript
-![screenshot-2](/assets/screenshot-2.png)
-MeetingTranscript has two modes of operation.
-
-**In both modes, transcript will be downloaded as a text file at the end of each meeting.**
-
-- **Auto mode:** Automatically records transcripts for all meetings
-- **Manual mode:** Switch on MeetingTranscript by clicking on captions icon in Google Meet (CC icon)
-
+- Transcribes meetings from the platform's own live captions, with speaker names
+- Captures the meeting chat alongside the transcript
+- Saves a text file after every meeting, into a folder you choose
+- Summarises a meeting with ChatGPT, using the ChatGPT tab you are already signed into
+- Files transcripts and summaries into an Obsidian vault, in per-account folders
+- Posts to any webhook, so the transcript can reach whatever tool you use
 
 <br />
-<br />
 
-# Integrating MeetingTranscript with other tools using webhooks
-You can integrate MeetingTranscript with any tool that accepts data from a webhook. Refer the "Set up webhooks" page in the extension for details about the webhook body.
-- [Google Docs integration guide](https://github.com/numandev/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=readme)
-- [n8n integration guide](https://github.com/numandev/transcriptonic/wiki/n8n-integration-guide?utm_source=readme)
+# Install
 
-<br />
-<br />
+Grab a build from the releases page — no build step needed:
 
-# FAQs
+- **[Latest build](../../releases/tag/latest)** — `meetingtranscript-latest.zip`, rebuilt on every push to `main`
+- **[Tagged releases](../../releases)** — fixed versions
 
-**1. Can I change the language of the transcript?**
+Then:
 
-Yes. MeetingTranscript picks up the output of Google Meet captions. Google Meet captions supports variety of languages that you can choose from. Click the settings icon when captions start showing and change the language.
-
-**2. I did not get any transcript at the end of the meeting.**
-
-This could happen when:
-1. New errors caused by Google Meet updates
-2. Any unexpected events like network drop, browser crashes etc.
-
-When this happens, it might be possible to recover the transcript, but recovery should be done before starting another meeting.
-- Open the extension and click on "last 10 meetings". Click on "Recover last meeting" button present after the table.
-- MeetingTranscript will also attempt to auto-recover any missed transcripts, just before a new meeting starts.
+1. Unzip the download.
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Choose **Load unpacked** and select the unzipped folder.
 
 <br />
+
+# Using it
+
+<img src="/assets/screenshot-popup.png" width="360" alt="The extension popup" />
+
+Two recording modes:
+
+- **Automatic** — every meeting is transcribed
+- **Manual** — turn captions on yourself when you want a transcript
+
+Both write a text file when the meeting ends. Turn individual platforms on or off in the popup; each one asks for its own permission the first time.
+
+<br />
+
+# Integrations
+
+Everything below is optional and off until you configure it. The extension makes no network requests of its own — it only talks to endpoints you enter.
+
+**Webhooks** — point it at any URL and each finished meeting is posted as JSON. Choose a pre-formatted body for no-code tools, or the raw structure for code. The meetings page documents both shapes.
+
+**Obsidian** — writes each meeting as a markdown note through the [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) plugin, with frontmatter, participants and a link between a summary and its transcript. Notes are filed per Google account, so meetings from different accounts stay separate. Requires the plugin's non-encrypted (HTTP) server, because the HTTPS port uses a self-signed certificate that browser extensions cannot accept.
+
+**ChatGPT summaries** — hands the transcript to the ChatGPT web app in a background tab and reads the answer back. No API key involved; it uses the session you are already signed into.
+
+<br />
+
+# Moving between computers
+
+The settings page exports your whole configuration to a file and imports it on another machine. Importing switches Obsidian on and asks for the permissions the imported setup needs.
+
+Transcripts are not included — they stay on the device that recorded them. Exported `.txt` transcripts can be imported back individually if you want them elsewhere.
+
 <br />
 
 # Development
 
-MeetingTranscript is written in TypeScript and bundled with webpack. The loadable extension is the generated `build/` directory, not `src/`.
+Written in TypeScript, bundled with webpack. The loadable extension is the generated `build/` directory.
 
 ```bash
 npm install
 npm run build      # development build into build/
 npm start          # same, in watch mode
-npm run check      # type check (tsc --noEmit)
-npm run zip        # production build + zip/ artifact for the Chrome Web Store
+npm run check      # type check
+npm run zip        # production build + zip/ artifact
 ```
 
 Then load `build/` via `chrome://extensions` → Developer mode → **Load unpacked**.
 
 Source layout:
 
-- `src/background-script/` — MV3 service worker: meeting post-processing, downloads, webhooks, content-script registration
-- `src/content-scripts/` — shared caption-capture machinery plus one directory per platform (`google-meet`, `teams`, `zoom`); each holds `config.ts` (DOM selectors), `utils.ts` and `index.ts`
-- `src/pages/` — webpack entry points and the HTML for the popup, meetings page and side panel
-- `src/lib/types.ts` — shared types and the error-code reference
+- `src/background-script/` — service worker: meeting processing, downloads, webhooks, Obsidian, summaries
+- `src/content-scripts/` — caption capture, with one directory per platform
+- `src/pages/` — popup, meetings page and side panel
+- `src/lib/` — shared types and helpers
+- `src/styles/app.css` — the design system shared by every page
 
 <br />
-<br />
 
-# Privacy policy
-MeetingTranscript Chrome extension does not collect any information from users in any manner, except anonymous errors and transcript download timestamp. All processing/transcript storage happens within the user's Chrome browser and does not leave the device, unless you configure a webhook and choose to post data to your webhook URL.
+# Privacy
 
-<br />
+Transcripts are captured and stored entirely in your browser. Nothing is sent anywhere unless you configure a webhook or Obsidian, in which case it goes only to the address you entered. There is no analytics, no error reporting and no remote configuration.
+
 <br />
 
 # Notice
-The transcript may not always be accurate and is only intended to aid in improving productivity. It is the responsibility of the user to ensure they comply with any applicable laws/rules.
 
-<br />
-<br />
+Transcripts come from automatic captions and are not always accurate. They are meant to aid productivity. It is your responsibility to comply with any laws or policies that apply to recording meetings.
+
+

@@ -1,0 +1,126 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# Needed to create releases and upload assets. Nothing else is granted.
+permissions:
+  contents: write
+
+concurrency:
+  # A newer push makes an in-flight build obsolete, so drop it rather than racing
+  # two jobs to publish to the same rolling release.
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        # A build that does not type check must never reach a release
+        run: npm run check
+
+      - name: Build production zip
+        run: npm run zip
+
+      - name: Resolve build output
+        id: build
+        run: |
+          set -euo pipefail
+          ZIP=$(ls zip/*.zip | head -1)
+          VERSION=$(node -p "require('./package.json').version")
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the zip is loadable
+        # Catches an empty or mis-structured archive here rather than when someone
+        # downloads it and Chrome refuses to load the extension.
+        run: |
+          set -euo pipefail
+          ZIP="${{ steps.build.outputs.zip }}"
+          unzip -l "$ZIP"
+          for required in manifest.json background.js popup.html styles/app.css; do
+            unzip -l "$ZIP" | grep -q " $required$" || { echo "::error::$required missing from $ZIP"; exit 1; }
+          done
+          VERSION_IN_ZIP=$(unzip -p "$ZIP" manifest.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          [ "$VERSION_IN_ZIP" = "${{ steps.build.outputs.version }}" ] \
+            || { echo "::error::manifest says $VERSION_IN_ZIP, package.json says ${{ steps.build.outputs.version }}"; exit 1; }
+          echo "zip verified: $ZIP (v$VERSION_IN_ZIP)"
+
+      # Always available, including on pull requests where no release is cut
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetingtranscript-${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # --- Tagged release: permanent, versioned -----------------------------
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" "${{ steps.build.outputs.zip }}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
+
+      # --- Rolling build from main: always one fresh, downloadable zip ------
+      - name: Publish rolling build
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ZIP="${{ steps.build.outputs.zip }}"
+          VERSION="${{ steps.build.outputs.version }}"
+
+          # A second copy under a fixed name, so the download link stays valid
+          # when the version is bumped.
+          cp "$ZIP" "zip/meetingtranscript-latest.zip"
+
+          # Built line by line so every line of the workflow stays indented inside
+          # this block while the notes file itself has no leading whitespace.
+          printf '%s\n' \
+            "Automatic build of \`main\` at \`${GITHUB_SHA:0:7}\`." \
+            "" \
+            "**Install**" \
+            "" \
+            "1. Download \`meetingtranscript-latest.zip\` below and unzip it." \
+            "2. Open \`chrome://extensions\` and turn on **Developer mode**." \
+            "3. Choose **Load unpacked** and select the unzipped folder." \
+            "" \
+            "This build is replaced on every push to \`main\`. For a fixed version, use a tagged release." \
+            > /tmp/release-notes.md
+
+          # Recreated rather than edited, so the tag always points at this commit
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+
+          gh release create latest \
+            "$ZIP" "zip/meetingtranscript-latest.zip" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "Latest build (v${VERSION})" \
+            --notes-file /tmp/release-notes.md

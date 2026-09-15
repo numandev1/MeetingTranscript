@@ -1,5 +1,5 @@
 import type { ExtensionStatusJSON } from "@lib/types"
-import { commonCSS } from "../common-config"
+import { LOGO_URL, commonCSS } from "../common-config"
 import { waitForElement } from "../common-utils"
 import { SELECTORS_TEAMS } from "./config"
 
@@ -13,7 +13,7 @@ export function showNotificationTeams(extensionStatusJSON: ExtensionStatusJSON):
 
     logo.setAttribute(
         "src",
-        "https://ejnana.github.io/transcripto-status/icon.png"
+        LOGO_URL
     )
     logo.setAttribute("height", "32px")
     logo.setAttribute("width", "32px")

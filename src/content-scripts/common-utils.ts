@@ -10,7 +10,7 @@ import type {
     ResultSync,
     TranscriptBlock,
 } from "@lib/types"
-import { LOGO_URL, LOG_ERROR_SCRIPT_URL, NOTIFICATION_PLATFORM_CONFIGS, mutationConfig } from "./common-config"
+import { LOGO_URL, NOTIFICATION_PLATFORM_CONFIGS, mutationConfig } from "./common-config"
 import { SELECTORS_GOOGLE_MEET } from "./google-meet/config"
 import { SELECTORS_TEAMS } from "./teams/config"
 import { SELECTORS_ZOOM } from "./zoom/config"
@@ -80,48 +80,20 @@ export function applyParticipantNameSetting(state: ContentScriptState): void {
 }
 
 /**
- * Fetches extension status from GitHub and saves to chrome storage.
- * Defaults to 200, if remote server is unavailable.
+ * Prepares the in-meeting banner text.
+ *
+ * This used to fetch a status document from the upstream project's site, which acted as
+ * a remote kill switch: a non-200 status there, or a minVersion above the installed
+ * build, disabled capture on every user's machine. A fork must not depend on another
+ * project's infrastructure to keep working, and a privacy-focused extension should not
+ * announce every meeting to a third party, so the check is gone and capture always runs.
  */
 export function checkExtensionStatus(state: ContentScriptState): Promise<string> {
-    return new Promise((resolve, reject) => {
-        // Set default value as 200
-        state.extensionStatusJSON = {
-            status: 200,
-            message: state.meetingSoftware ? NOTIFICATION_PLATFORM_CONFIGS[state.platform].notificationText : ""
-        }
-
-        // https://stackoverflow.com/a/42518434
-        fetch(
-            state.meetingSoftware ? NOTIFICATION_PLATFORM_CONFIGS[state.platform].statusUrl : "",
-            { cache: "no-store" }
-        )
-            .then((response) => response.json())
-            .then((result) => {
-                const minVersion = result.minVersion
-
-                // Disable extension if version is below the min version
-                if (!meetsMinVersion(chrome.runtime.getManifest().version, minVersion)) {
-                    state.extensionStatusJSON.status = 400
-                    state.extensionStatusJSON.message = `<strong>MeetingTranscript is not running</strong> <br /> Please update to v${minVersion} by following <a href="https://github.com/numandev/transcriptonic/wiki/Manually-update-MeetingTranscript" target="_blank">these instructions</a>`
-                }
-                else {
-                    // Update status based on response
-                    state.extensionStatusJSON.status = result.status
-                    state.extensionStatusJSON.message = result.message
-                    state.extensionStatusJSON.showBetaMessage = (result.showBetaMessage === true)
-                }
-
-                console.log("Extension status fetched and saved")
-                resolve("Extension status fetched and saved")
-            })
-            .catch((err) => {
-                console.error(err)
-                reject("Could not fetch extension status")
-
-                logError(state, "008", err)
-            })
-    })
+    state.extensionStatusJSON = {
+        status: 200,
+        message: state.meetingSoftware ? NOTIFICATION_PLATFORM_CONFIGS[state.platform].notificationText : ""
+    }
+    return Promise.resolve("Extension status set")
 }
 
 /** Overwrite state to chrome storage */
@@ -578,9 +550,15 @@ export function logTranscriptToConsole(state: ContentScriptState): void {
     }
 }
 
-/** Logs anonymous errors to a Google sheet for swift debugging */
+/**
+ * Records a DOM breakage for debugging.
+ *
+ * Previously posted to the upstream project's Google Apps Script endpoint, which sent
+ * this fork's error reports to someone else. Kept as a local console report so the error
+ * codes in lib/types.ts still mean something when a user sends a console log.
+ */
 export function logError(state: ContentScriptState, code: string, err: unknown): void {
-    fetch(`${LOG_ERROR_SCRIPT_URL}?version=${chrome.runtime.getManifest().version}&code=${code}&error=${encodeURIComponent(String(err))}&meetingSoftware=${state.meetingSoftware}`, { mode: "no-cors" })
+    console.error(`[MeetingTranscript] error ${code} on ${state.meetingSoftware || "unknown platform"}:`, err)
 }
 
 /** Checks if the installed extension version meets the minimum required version. */
