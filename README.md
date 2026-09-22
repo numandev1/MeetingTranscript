@@ -13,7 +13,7 @@ Private meeting transcripts for Google Meet, Microsoft Teams and Zoom. Everythin
 - Transcribes meetings from the platform's own live captions, with speaker names
 - Captures the meeting chat alongside the transcript
 - Saves a text file after every meeting, into a folder you choose
-- Summarises a meeting with ChatGPT, using the ChatGPT tab you are already signed into
+- Summarises a meeting with ChatGPT, using the account you are already signed into — on a button, or automatically as soon as a meeting ends
 - Files transcripts and summaries into an Obsidian vault, in per-account folders
 - Posts to any webhook, so the transcript can reach whatever tool you use
 
@@ -55,7 +55,7 @@ Everything below is optional and off until you configure it. The extension makes
 
 **Obsidian** — writes each meeting as a markdown note through the [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) plugin, with frontmatter, participants and a link between a summary and its transcript. Notes are filed per Google account, so meetings from different accounts stay separate. Requires the plugin's non-encrypted (HTTP) server, because the HTTPS port uses a self-signed certificate that browser extensions cannot accept.
 
-**ChatGPT summaries** — hands the transcript to the ChatGPT web app in a background tab and reads the answer back. No API key involved; it uses the session you are already signed into.
+**ChatGPT summaries** — hands the transcript to the ChatGPT web app in a tab of its own and reads the answer back. No API key involved; it uses the session you are already signed into. Turn on **Summarise automatically when a meeting ends** in Settings and you never press anything: the tab opens itself, sends the transcript, saves the summary next to the transcript and files it in Obsidian, and closes again. The tab is in front for the few seconds it takes to type the message — ChatGPT ignores a hidden tab — and you get your place back as soon as the answer starts arriving.
 
 <br />
 
@@ -99,7 +99,7 @@ Three optional features send data out, each only when you use them:
 
 - **Webhook** — the meeting is posted to the URL you entered, and nowhere else.
 - **Obsidian** — notes are written to the Local REST API address you entered, normally your own machine.
-- **Summarise** — the transcript is sent to **ChatGPT**, in the browser tab you are signed into, and is therefore subject to OpenAI's terms and data handling. Don't use it for meetings you cannot share with a third party.
+- **Summarise** — the transcript is sent to **ChatGPT**, in the browser tab you are signed into, and is therefore subject to OpenAI's terms and data handling. Don't use it for meetings you cannot share with a third party. This is off until you ask for it, and automatic summarising is a separate, second opt-in: turning it on asks you to confirm, because from then on every meeting goes to ChatGPT without a further prompt.
 
 <br />
 

@@ -431,6 +431,21 @@
                             <button id="reset-summary-prompt" type="button" class="btn-secondary">Reset to default</button>
                         </div>
                     </form>
+
+                    <hr />
+
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="auto-summarize" aria-describedby="auto-summarize-help">
+                        <label for="auto-summarize">
+                            Summarise automatically when a meeting ends
+                        </label>
+                    </div>
+                    <p id="auto-summarize-help" class="sub-text" style="margin-top: 0.75rem;">
+                        Opens a ChatGPT tab on its own, sends the transcript, saves the summary, and closes the tab
+                        again. The tab is in front for a few seconds while the message is typed &mdash; ChatGPT ignores
+                        a hidden tab &mdash; then you get your place back. This sends every meeting's full transcript
+                        to ChatGPT, where OpenAI's terms and data handling apply.
+                    </p>
                 </div>
 
                 <div class="card">

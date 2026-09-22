@@ -7,26 +7,35 @@ export const SETTINGS_FILE_VERSION = 1
 export const SETTINGS_FILE_KIND = "meetingtranscript-settings"
 
 /**
- * Every synced setting, listed once so export and import cannot drift apart.
- * Adding a setting means adding it here, and both directions pick it up.
+ * Every synced setting and the type it holds, listed once so export and import cannot
+ * drift apart. Adding a setting means adding it here, and both directions pick it up.
+ *
+ * The type is recorded alongside the name because a settings file is untrusted input:
+ * import validates each value against the type that setting actually takes, which a
+ * bare list of names cannot express.
  */
-export const TRANSFERABLE_SYNC_KEYS = [
-    "operationMode",
-    "hideCaptions",
-    "participantName",
-    "autoPostWebhookAfterMeeting",
-    "autoDownloadFileAfterMeeting",
-    "downloadSubfolder",
-    "webhookUrl",
-    "webhookBodyType",
-    "obsidianEnabled",
-    "obsidianFolder",
-    "obsidianSummaryFolder",
-    "obsidianBaseUrl",
-    "wantGoogleMeet",
-    "wantTeams",
-    "wantZoom",
-] as const satisfies readonly (keyof ResultSync)[]
+export const TRANSFERABLE_SYNC_TYPES = {
+    operationMode: "string",
+    hideCaptions: "boolean",
+    participantName: "string",
+    autoPostWebhookAfterMeeting: "boolean",
+    autoDownloadFileAfterMeeting: "boolean",
+    autoSummarizeAfterMeeting: "boolean",
+    downloadSubfolder: "string",
+    summaryPrompt: "string",
+    meetingsToKeep: "number",
+    webhookUrl: "string",
+    webhookBodyType: "string",
+    obsidianEnabled: "boolean",
+    obsidianFolder: "string",
+    obsidianSummaryFolder: "string",
+    obsidianBaseUrl: "string",
+    wantGoogleMeet: "boolean",
+    wantTeams: "boolean",
+    wantZoom: "boolean",
+} as const satisfies Partial<Record<keyof ResultSync, "string" | "boolean" | "number">>
+
+export const TRANSFERABLE_SYNC_KEYS = Object.keys(TRANSFERABLE_SYNC_TYPES) as (keyof typeof TRANSFERABLE_SYNC_TYPES)[]
 
 export interface SettingsFile {
     kind: typeof SETTINGS_FILE_KIND
@@ -107,10 +116,19 @@ export function parseSettingsFile(raw: string): ParsedSettingsFile {
         if (value === undefined) {
             continue
         }
-        // Only the two shapes any setting actually uses
-        if (typeof value === "string" || typeof value === "boolean") {
-            settings[key] = value
+        // Checked against the type this particular setting takes, not against the set
+        // of types settings use in general: a number where a boolean belongs is a
+        // corrupt file, and storing it would leave a checkbox in a state the UI has no
+        // way to show.
+        if (typeof value !== TRANSFERABLE_SYNC_TYPES[key]) {
+            continue
         }
+        // A count also has to be sane. meetingsToKeep decides how much history
+        // survives, so a negative or fractional value must not reach storage.
+        if ((typeof value === "number") && (!Number.isInteger(value) || value < 0)) {
+            continue
+        }
+        settings[key] = value
     }
 
     if (Object.keys(settings).length === 0) {

@@ -81,6 +81,8 @@ Lifecycle differences: Google Meet's init runs once on injection (the SPA persis
 | Webhook POST | `autoPostWebhookAfterMeeting` + `webhookUrl` | `webhookPostStatus` + post button |
 | Obsidian note | `obsidianEnabled` | `obsidianPostStatus` + save/retry button |
 
+Then, sequentially after those have settled, an optional fourth: a ChatGPT summary when `autoSummarizeAfterMeeting` is on (see below).
+
 Obsidian (`src/background-script/obsidian.ts`) `PUT`s markdown to the [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) plugin at `http://127.0.0.1:27123/vault/<folder>/<Title> <YYYY-MM-DD>.md` with a Bearer key. Two constraints drive that design:
 
 - **Plain HTTP, not HTTPS.** The plugin's 27124 port serves a self-signed certificate, which `fetch()` in a service worker rejects with no way to opt out. The user must enable the plugin's non-encrypted server.
@@ -90,16 +92,29 @@ A `TypeError` from `fetch` is mapped to error code `019` ("is Obsidian running?"
 
 ### ChatGPT summaries
 
-`src/background-script/summarizer.ts` drives the ChatGPT **web app** (there is no API key) via `chrome.scripting.executeScript`, then files the result in the Obsidian summary folder. Four things are load-bearing and each was a real failure before it was fixed:
+`src/background-script/summarizer.ts` drives the ChatGPT **web app** (there is no API key) via `chrome.scripting.executeScript`, then files the result in the Obsidian summary folder. Six things are load-bearing and each was a real failure before it was fixed:
 
+- **The tab has to be in front to submit.** `execCommand("insertText")` needs the *document* focused, which only the active tab of a focused window has; opened hidden, the insert silently does nothing and the run completes only if the user switches to the tab by hand. So `openChatGptTab` opens the tab active, remembers what was in front, and `restoreFocus` hands the user's place back the moment answer text appears (or after `FOREGROUND_GRACE_MS`, so a failure does not squat on the screen). Reading the answer needs no focus at all — that is the service worker polling the DOM.
 - **`world: "MAIN"` is mandatory.** From an isolated world, `execCommand("insertText")` mutates the DOM without ProseMirror's model seeing it. The composer then still reads empty, and since the send button is a `type="submit"` inside a form, clicking it performs a native GET to `chatgpt.com/?prompt-textarea=` that navigates the page away instead of sending.
 - **Verify the composer holds text before clicking send**, for the same reason — an empty submit is destructive, not a no-op.
 - **Wait for `tabs.onUpdated` → `complete`.** `tabs.create`/`tabs.update` call back when navigation *starts*, so injecting immediately races the load.
-- **Completion is signalled by an end marker in the reply**, not by the DOM. The stop button disappears while text is still streaming, so a stability heuristic alone truncates answers mid-sentence.
+- **Completion is signalled by an end marker in the reply**, not by the DOM. The stop button disappears while text is still streaming, so a stability heuristic alone truncates answers mid-sentence. **An answer that never finished is never stored**: `readResponse` returns `{ text, complete }`, and only a marker or `isStableAnswer` holding for `STABLE_POLLS_REQUIRED` polls counts as complete. Running out of time is a failure, reported with how much arrived. Returning the partial text and letting the caller store it is how an 80-block meeting came to be filed, successfully, as a 46-character summary that stopped mid-word.
+- **A failed attempt keeps the previous summary, and the UI says so.** Clearing it would destroy a good summary from an earlier run, so it stays — but the row then shows a `stale` badge and the viewer a warning. Without that, a half-written summary left behind by a failed retry reads as the current one, which is precisely how a 46-character summary sat unnoticed on a 24-minute meeting.
+- **`isStableAnswer` requires generation to have been *seen*.** A lull before ChatGPT starts answering is otherwise indistinguishable from a finished answer, so the first burst of text gets accepted as the whole summary. The tab is also pinned with `autoDiscardable: false`, because Chrome evicts hidden tabs under memory pressure and a discarded tab looks exactly like an answer that stopped growing.
 
-The answer is requested inside a fenced code block and read from `pre code`, because `innerText` on the rendered message flattens `## Summary` to `Summary`.
+The answer is requested inside a fenced code block and read from `pre code`, because the rendered message flattens `## Summary` to `Summary`.
 
-A dedicated background tab is opened per summary and closed on success — never the user's own ChatGPT tab, which would discard whatever conversation they had open. A failed run deliberately leaves its tab open so the cause (signed out, rate limited) is visible.
+**The block is preferred only when it actually holds text.** `pickAnswerText` in `src/lib/summary-text.ts` makes that choice, and it sits outside the injected function so it can be tested. Choosing with `??` was a live bug: ChatGPT renders the opening fence the moment the model emits it, so `pre code` routinely exists and is empty, `""` is not nullish, and the fallback to the message never fired. The reader then saw nothing for the full `RESPONSE_TIMEOUT_MS` and reported 021 against a summary that was plainly on screen — intermittently, depending on how that run happened to render. Both readings are taken with `textContent`, which needs no layout, since the tab is deliberately not in front by then.
+
+A dedicated tab is opened per summary — never the user's own ChatGPT tab, which would discard whatever conversation they had open — and it is **always closed, on every path**, from a `finally`. Failure used to leave the tab open so the cause was visible, which does not survive the automatic run: nobody is watching it, so each failure just left another ChatGPT tab behind and the cause still had to be guessed. `describeFailure()` now reads those signals (signed out, usage limit, an alert, prompt never sent, answer never started) off the page before it closes, and they travel in the error message and into `recentErrors`.
+
+`summarizeAndFileMeeting()` is the single entry point: it summarises, then saves the summary file and the vault note, each under its own setting. Both the Summarise button and the automatic run after a meeting go through it, so a summary is filed the same way however it was triggered — the follow-ups are bonuses and can never turn a stored summary into a reported failure.
+
+With `autoSummarizeAfterMeeting` on, `processLastMeeting()` runs it **after** the download/webhook/Obsidian fan-out has settled, never inside it: it drives a real tab for up to three minutes, and the transcript must already be filed before anything that slow runs. A failure there resolves the meeting-end path anyway and is recorded in `recentErrors` — nobody clicked anything, so there is no dialog to report it in, and silence is the failure this list exists to prevent.
+
+The setting is off until the user turns it on, and the toggle itself is the consent moment: it confirms, then requests the `chatgpt.com` host permission from inside the change handler (a user gesture), and unticks itself if either is refused rather than promising something that cannot happen.
+
+`meetingTabId` deliberately stays `"processing"` for the whole summary. That defers an extension update that would otherwise reload the service worker mid-run and lose the answer. The polling also **is** the service worker's keepalive: a `chrome.*` call every second holds it past its idle timeout, which is why the tab-load wait polls `chrome.tabs.get` instead of sleeping on one long `setTimeout` — the automatic run has no open message port to keep the worker up.
 
 This is the most fragile part of the codebase: it depends on selectors in a page nobody here controls. `#prompt-textarea`, `button[data-testid="send-button"]`, `button[data-testid="stop-button"]` and `[data-message-author-role="assistant"]` are the four to re-check when summaries stop working.
 
@@ -143,7 +158,7 @@ Re-running is safe by design — notes are addressed by title and date, so a sec
 
 ### Moving a setup between machines
 
-`src/lib/settings-transfer.ts` exports every synced setting to a JSON file and reads it back. `TRANSFERABLE_SYNC_KEYS` is the single list both directions use, so adding a setting cannot leave export and import out of step.
+`src/lib/settings-transfer.ts` exports every synced setting to a JSON file and reads it back. `TRANSFERABLE_SYNC_TYPES` maps each setting to the type it holds and is the single source both directions use (`TRANSFERABLE_SYNC_KEYS` is derived from it), so adding a setting cannot leave export and import out of step. The type is recorded next to the name because import validates each value against *that setting's* type — a bare list of names cannot express that a number in a boolean's place is a corrupt file, and storing it would leave a checkbox in a state the UI cannot render.
 
 Two rules are deliberate, not incidental:
 

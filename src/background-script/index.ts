@@ -2,7 +2,7 @@ import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, Result
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
-import { summarizeMeeting } from "./summarizer"
+import { summarizeAndFileMeeting } from "./summarizer"
 import {
     getPermissionStatus,
     requestPlatformPermission,
@@ -190,30 +190,9 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
     if (message.type === "summarize_at_index") {
         if ((typeof message.index === "number") && (message.index >= 0)) {
             const index = message.index
-            summarizeMeeting(index)
+            summarizeAndFileMeeting(index)
                 .then((summary) => {
-                    // Filing the summary in Obsidian is a bonus: the summary itself is
-                    // already saved, so a vault failure must not report the whole
-                    // summarise action as failed.
-                    chrome.storage.sync.get(["obsidianEnabled", "autoDownloadFileAfterMeeting"], function (resultSyncUntyped) {
-                        const resultSync = resultSyncUntyped as Partial<ResultSync>
-
-                        // Saving the file and filing it in Obsidian are both bonuses: the
-                        // summary is already stored, so neither failing may report the
-                        // summarise action itself as failed.
-                        const followUps: Promise<unknown>[] = []
-                        if (resultSync.autoDownloadFileAfterMeeting !== false) {
-                            followUps.push(downloadSummary(index)
-                                .catch((error) => console.error("Could not save the summary file:", error)))
-                        }
-                        if (resultSync.obsidianEnabled) {
-                            followUps.push(postSummaryToObsidian(index)
-                                .catch((error) => console.error("Could not save summary to Obsidian:", error)))
-                        }
-
-                        Promise.all(followUps).finally(() =>
-                            sendResponse({ success: true, message: summary } satisfies ExtensionResponse))
-                    })
+                    sendResponse({ success: true, message: summary } satisfies ExtensionResponse)
                 })
                 .catch((error) => {
                     // Fails with error codes: 010, 020, 021, 022
@@ -435,6 +414,9 @@ chrome.runtime.onInstalled.addListener(() => {
         chrome.storage.sync.set({
             autoPostWebhookAfterMeeting: resultSync.autoPostWebhookAfterMeeting === false ? false : true,
             autoDownloadFileAfterMeeting: resultSync.autoDownloadFileAfterMeeting === false ? false : true,
+            // Opt-in: it sends the transcript to ChatGPT and takes the screen for a
+            // few seconds, so it may never switch itself on.
+            autoSummarizeAfterMeeting: resultSync.autoSummarizeAfterMeeting === true ? true : false,
             // Only seed the default when unset — an empty string is a deliberate
             // "save straight into Downloads" choice and must survive updates.
             downloadSubfolder: typeof resultSync.downloadSubfolder === "string" ? resultSync.downloadSubfolder : DEFAULT_DOWNLOAD_SUBFOLDER,

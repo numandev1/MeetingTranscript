@@ -3,6 +3,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
+import * as summaryText from "../src/lib/summary-text.ts"
 
 const require = createRequire(import.meta.url)
 const paths = require("../.test-build/lib/paths.js")
@@ -106,6 +107,35 @@ test("unknown and wrong-typed settings are dropped, not stored", () => {
   assert.equal({}.evilKey, undefined, "prototype was polluted")
 })
 
+test("numeric settings transfer, but only sane ones", () => {
+  const roundTrip = (settings) => transfer.parseSettingsFile(JSON.stringify({
+    kind: "meetingtranscript-settings", version: 1, settings,
+  })).settings
+
+  assert.equal(roundTrip({ meetingsToKeep: 50 }).meetingsToKeep, 50)
+  assert.equal(roundTrip({ meetingsToKeep: 0 }).meetingsToKeep, 0, "0 means keep everything")
+  assert.equal("meetingsToKeep" in roundTrip({ meetingsToKeep: -1, operationMode: "auto" }), false)
+  assert.equal("meetingsToKeep" in roundTrip({ meetingsToKeep: 2.5, operationMode: "auto" }), false)
+  assert.equal("meetingsToKeep" in roundTrip({ meetingsToKeep: "10", operationMode: "auto" }), false)
+})
+
+test("every transferable setting is checked against its own type", () => {
+  // A number in a boolean's place is a corrupt file, not a value to store
+  const parsed = transfer.parseSettingsFile(JSON.stringify({
+    kind: "meetingtranscript-settings", version: 1,
+    settings: { autoSummarizeAfterMeeting: 1, summaryPrompt: true, operationMode: "auto" },
+  }))
+  assert.equal("autoSummarizeAfterMeeting" in parsed.settings, false)
+  assert.equal("summaryPrompt" in parsed.settings, false)
+})
+
+test("the auto-summarise setting survives a round trip", () => {
+  const file = transfer.buildSettingsFile({ autoSummarizeAfterMeeting: true, meetingsToKeep: 25 })
+  const parsed = transfer.parseSettingsFile(JSON.stringify(file))
+  assert.equal(parsed.settings.autoSummarizeAfterMeeting, true)
+  assert.equal(parsed.settings.meetingsToKeep, 25)
+})
+
 test("an exported transcript file round trips", () => {
   const meeting = importer.parseTranscriptFile(
     "Google Meet transcript-Sync at 15-09-2026, 01-05 pm on.txt",
@@ -183,4 +213,40 @@ test("retention only ever returns meetings, so it cannot reach the vault", () =>
   assert.ok(Array.isArray(kept))
   assert.equal(retention.trimMeetings.length, 2, "takes only (meetings, keep)")
   assert.equal(kept.every(m => typeof m.meetingStartTimestamp === "string"), true)
+})
+
+test("the fenced block is only preferred when it actually holds text", () => {
+  // The regression: ChatGPT renders the opening fence before any text lands inside it,
+  // so an empty code block must never be read as the answer.
+  assert.equal(summaryText.pickAnswerText("", "## Summary\nfrom the message"), "## Summary\nfrom the message")
+  assert.equal(summaryText.pickAnswerText("   ", "from the message"), "from the message")
+  assert.equal(summaryText.pickAnswerText(undefined, "from the message"), "from the message")
+  // When it does hold text, it wins: it keeps the markdown the rendered message drops
+  assert.equal(summaryText.pickAnswerText("## Summary\nfenced", "Summary fenced"), "## Summary\nfenced")
+  assert.equal(summaryText.pickAnswerText("", ""), "")
+  assert.equal(summaryText.pickAnswerText(undefined, undefined), "")
+})
+
+test("the end marker signals completion and is stripped wherever it lands", () => {
+  const marker = summaryText.END_MARKER
+  assert.equal(summaryText.isAnswerComplete("## Summary\ntext"), false)
+  assert.equal(summaryText.isAnswerComplete(`## Summary\ntext\n${marker}`), true)
+  assert.equal(summaryText.stripEndMarker(`## Summary\ntext\n${marker}`), "## Summary\ntext")
+  // Renderers have been seen to repeat it; none of them may survive into the summary
+  assert.equal(summaryText.stripEndMarker(`${marker}\n## Summary\n${marker}`), "## Summary")
+})
+
+test("a marker-less answer is only finished when generation demonstrably ended", () => {
+  const base = { text: "## Summary\nhalf a sen", previousText: "## Summary\nhalf a sen", busy: false, sawGenerating: true }
+  assert.equal(summaryText.isStableAnswer(base), true)
+
+  // The regression: a lull before ChatGPT starts generating looked identical to a
+  // finished answer, so the first burst was stored as the whole summary.
+  assert.equal(summaryText.isStableAnswer({ ...base, sawGenerating: false }), false)
+  // Still streaming
+  assert.equal(summaryText.isStableAnswer({ ...base, busy: true }), false)
+  // Text is still growing
+  assert.equal(summaryText.isStableAnswer({ ...base, previousText: "## Summary\nhalf" }), false)
+  // The stop button goes before the text lands, so empty is never finished
+  assert.equal(summaryText.isStableAnswer({ ...base, text: "", previousText: "" }), false)
 })

@@ -221,6 +221,13 @@ export interface ResultSync {
   /** Whether to automatically download the transcript file after each meeting. */
   autoDownloadFileAfterMeeting: boolean
   /**
+   * Whether to summarise each meeting through ChatGPT as soon as it ends, without
+   * waiting for the Summarise button. Off unless the user turns it on: it sends the
+   * transcript to a third party and briefly brings a tab to the front, neither of
+   * which may start happening on its own.
+   */
+  autoSummarizeAfterMeeting: boolean
+  /**
    * Folder the transcript text file is saved into, relative to the browser's Downloads
    * directory. Empty string saves straight into Downloads. Chrome cannot write outside
    * the Downloads directory, so this is always a relative path.

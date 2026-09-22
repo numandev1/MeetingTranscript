@@ -292,6 +292,16 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
         heading.textContent = "Summary"
         bodyElement.appendChild(heading)
 
+        // A failed attempt keeps the previous summary rather than destroying one that may
+        // have been good, so the reader has to be told which one they are looking at. This
+        // is the screen where a truncated summary was read as the real one.
+        if (meeting.summaryStatus === "failed") {
+            const warning = document.createElement("p")
+            warning.className = "status status-failed"
+            warning.textContent = "The last attempt to summarise failed. This is from an earlier attempt and may be cut short — summarise again to replace it."
+            bodyElement.appendChild(warning)
+        }
+
         const summaryElement = document.createElement("p")
         summaryElement.className = "dialog-block-text"
         summaryElement.textContent = meeting.summary
@@ -882,6 +892,49 @@ function setupSummaryPrompt(): void {
             alert("Back to the default instructions.")
         })
     })
+
+    setupAutoSummarize()
+}
+
+/**
+ * The switch that turns every meeting's end into a summary, with no button press.
+ *
+ * Turning it on is treated as the moment of consent, because it is: it is the last
+ * point at which the user is asked before transcripts start leaving the device on
+ * their own. The host permission is requested from inside the change handler so it
+ * still counts as a user gesture, and the box goes back to unchecked if either the
+ * confirmation or the permission is refused — a checkbox that stays ticked after a
+ * refusal would promise something that cannot happen.
+ */
+function setupAutoSummarize(): void {
+    const toggle = document.querySelector<HTMLInputElement>("#auto-summarize")
+    if (!toggle) return
+
+    chrome.storage.sync.get(["autoSummarizeAfterMeeting"], function (resultSyncUntyped) {
+        const resultSync = resultSyncUntyped as Partial<ResultSync>
+        toggle.checked = resultSync.autoSummarizeAfterMeeting === true
+    })
+
+    toggle.addEventListener("change", function () {
+        if (!toggle.checked) {
+            chrome.storage.sync.set({ autoSummarizeAfterMeeting: false })
+            return
+        }
+
+        if (!confirm("Every meeting will be sent to ChatGPT automatically when it ends, where OpenAI's terms and data handling apply.\n\nA ChatGPT tab will come to the front for a few seconds each time, then hand your place back.\n\nTurn this on?")) {
+            toggle.checked = false
+            return
+        }
+
+        requestChatGptPermission()
+            .then(() => {
+                chrome.storage.sync.set({ autoSummarizeAfterMeeting: true })
+            })
+            .catch(() => {
+                toggle.checked = false
+                alert("MeetingTranscript needs access to chatgpt.com to summarise meetings.")
+            })
+    })
 }
 
 /**
@@ -1058,8 +1111,17 @@ function loadMeetings(): void {
                             <button class="view-button" data-index="${i}" title="View transcript" aria-label="View this meeting transcript">
                                 <span class="icon icon-view"></span>
                             </button>
-                            ${meeting.summary ? `<button class="view-summary-button" data-index="${i}" title="View summary" aria-label="View this meeting summary">
-                                Summary
+                            ${meeting.summary ? `<button class="view-summary-button" data-index="${i}" title="${
+                                // A failed attempt leaves the previous summary in place rather than
+                                // destroying one that may have been good. That is only safe if the
+                                // row says so — otherwise a stale, half-written summary reads as
+                                // the current one, which is exactly how a truncated summary went
+                                // unnoticed.
+                                meeting.summaryStatus === "failed"
+                                    ? `The last attempt to summarise failed \u2014 this is from an earlier one`
+                                    : `View summary`
+                            }" aria-label="View this meeting summary">
+                                Summary${meeting.summaryStatus === "failed" ? ` <span class="status status-failed">stale</span>` : ``}
                             </button>` : `<span class="summary-slot"></span>`}
                             <button class="summarize-button" data-index="${i}" title="${meeting.summary ? `Re-summarise with ChatGPT` : `Summarise with ChatGPT`}" aria-label="Summarise this meeting with ChatGPT">
                                 ${meeting.summary ? `Re-summarise` : `Summarise`}

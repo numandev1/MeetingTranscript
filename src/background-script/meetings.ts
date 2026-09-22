@@ -3,6 +3,7 @@ import { DEFAULT_MEETINGS_TO_KEEP } from "@lib/paths"
 import { trimMeetings } from "@lib/retention"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
 import { postTranscriptToObsidian } from "./obsidian"
+import { summarizeAndFileMeeting } from "./summarizer"
 
 /**
  * Download transcripts, post webhook if URL is enabled and available.
@@ -15,7 +16,7 @@ export function processLastMeeting(): Promise<string> {
             .then(() => {
                 chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
                     const resultLocal = resultLocalUntyped as Partial<ResultLocal>
-                    chrome.storage.sync.get(["webhookUrl", "autoPostWebhookAfterMeeting", "autoDownloadFileAfterMeeting", "obsidianEnabled"], function (resultSyncUntyped) {
+                    chrome.storage.sync.get(["webhookUrl", "autoPostWebhookAfterMeeting", "autoDownloadFileAfterMeeting", "obsidianEnabled", "autoSummarizeAfterMeeting"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
 
                         // pickupLastMeetingFromStorage resolved, so at least one meeting exists
@@ -49,7 +50,28 @@ export function processLastMeeting(): Promise<string> {
                         // Execute all promises in parallel
                         Promise.all(promises)
                             .then(() => {
-                                resolve("Meeting processing and download/webhook posting complete")
+                                // Summarising is sequenced after the fan-out, not part
+                                // of it: it drives a real browser tab for up to three
+                                // minutes, and the transcript must already be safely
+                                // filed before anything that slow and that fragile runs.
+                                if (!resultSync.autoSummarizeAfterMeeting) {
+                                    resolve("Meeting processing and download/webhook posting complete")
+                                    return
+                                }
+
+                                // A failed summary is not a failed meeting. The
+                                // transcript is downloaded, filed and posted by now, so
+                                // ChatGPT being signed out or unreachable is reported to
+                                // the console and the recent-errors list, never by
+                                // rejecting the meeting-end path.
+                                summarizeAndFileMeeting(lastIndex)
+                                    .then(() => resolve("Meeting processing, exports and summary complete"))
+                                    .catch((error) => {
+                                        const parsedError = error as ErrorObject
+                                        console.error("Automatic summary failed:", parsedError.errorMessage ?? error)
+                                        recordSummaryFailure(parsedError)
+                                        resolve("Meeting processing complete, automatic summary failed")
+                                    })
                             })
                             .catch(error => {
                                 // Fails with error codes: 009, 010, 011, 012
@@ -65,6 +87,27 @@ export function processLastMeeting(): Promise<string> {
                 const parsedError = error as ErrorObject
                 reject({ errorCode: parsedError.errorCode, errorMessage: parsedError.errorMessage } satisfies ErrorObject)
             })
+    })
+}
+
+/**
+ * Notes a failed automatic summary in the same list the capture errors go to.
+ *
+ * The automatic run has no dialog to show a message in — nobody clicked anything — so
+ * without this a signed-out ChatGPT would fail completely silently, which is the exact
+ * failure mode the recent-errors list exists to prevent.
+ */
+function recordSummaryFailure(error: ErrorObject): void {
+    chrome.storage.local.get(["recentErrors"], function (resultLocalUntyped) {
+        const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+        const recentErrors = resultLocal.recentErrors ?? []
+        recentErrors.push({
+            at: new Date().toISOString(),
+            code: error?.errorCode ?? "021",
+            meetingSoftware: "",
+            message: error?.errorMessage ?? "Automatic summary failed"
+        })
+        chrome.storage.local.set({ recentErrors: recentErrors.slice(-20) })
     })
 }
 
