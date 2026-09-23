@@ -167,6 +167,15 @@ Two rules are deliberate, not incidental:
 
 A settings file is untrusted input — it arrives from another machine, possibly another version. `parseSettingsFile` therefore allowlists against `TRANSFERABLE_SYNC_KEYS` and type-checks each value, so an unknown or wrong-typed key is dropped rather than written to storage.
 
+### Rejoins are merged, not filed twice
+
+A Meet page that reloads, or a user who leaves and rejoins, starts a fresh content script whose startup recovery files what came before as a finished meeting. Left alone, one call became two meetings: a few seconds with a one-line auto-summary, and the rest. `src/lib/meeting-merge.ts` fixes this at the single point every path goes through, `pickupLastMeetingFromStorage()`:
+
+- **Only Google Meet, only the same address, only within `REJOIN_WINDOW_MS`.** The background records `meetingUrl` (query string stripped) from the sender tab on `new_meeting_started`. Teams and Zoom addresses do not identify one meeting, and merging two unrelated calls is worse than a split one.
+- **The merged meeting keeps the first piece's start time**, so the Obsidian note and file names stay the same and are overwritten. Later start times go in `mergedStartTimestamps`, which `recoverLastMeeting()` checks via `coversStartTimestamp`; without that, the later piece looks unfiled and gets filed again.
+- **The earlier summary is dropped on merge.** It describes only the first piece.
+- **Automatic summaries skip meetings under `MIN_WORDS_TO_AUTO_SUMMARIZE` words.** The fragment is still downloaded and filed when the rejoin happens, but it no longer puts ChatGPT in front mid-call. The Summarise button works on anything.
+
 ### Meeting-end paths
 
 A meeting is finalised either by the content script's call-end click handler (`meeting_ended` message) **or** by `chrome.tabs.onRemoved` matching the stored `meetingTabId`. `meetingTabId` is a three-state flag: a tab id (meeting live), `"processing"` (post-processing; suppresses the double-download and defers extension updates), or `null` (idle). `chrome.runtime.onUpdateAvailable` sets `isDeferredUpdatedAvailable` rather than reloading mid-meeting; `clearTabIdAndApplyUpdate()` applies it afterwards.

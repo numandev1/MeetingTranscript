@@ -10,6 +10,7 @@ const paths = require("../.test-build/lib/paths.js")
 const transfer = require("../.test-build/lib/settings-transfer.js")
 const importer = require("../.test-build/lib/transcript-import.js")
 const retention = require("../.test-build/lib/retention.js")
+const merge = require("../.test-build/lib/meeting-merge.js")
 
 const { getFolderPrefix, withAccountSubfolder, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_DOWNLOAD_SUBFOLDER } = paths
 
@@ -249,4 +250,86 @@ test("a marker-less answer is only finished when generation demonstrably ended",
   assert.equal(summaryText.isStableAnswer({ ...base, previousText: "## Summary\nhalf" }), false)
   // The stop button goes before the text lands, so empty is never finished
   assert.equal(summaryText.isStableAnswer({ ...base, text: "", previousText: "" }), false)
+})
+
+// The 23 Sep standup: the Meet page reloaded 17 seconds in, and the call was filed as
+// two meetings — one block with a one-line summary, and the rest.
+function rejoinPieces() {
+  const url = "https://meet.google.com/abc-defg-hij"
+  const first = {
+    meetingSoftware: "Google Meet", meetingTitle: "Meet - Supply Chain Standup", meetingUrl: url,
+    meetingStartTimestamp: "2026-09-23T07:17:08.887Z", meetingEndTimestamp: "2026-09-23T07:17:25.977Z",
+    transcript: [{ personName: "Ahmad", timestamp: "2026-09-23T07:17:10.000Z", transcriptText: "Okay mostly expert community is here. So, yeah. okay I" }],
+    chatMessages: [], webhookPostStatus: "successful", obsidianPostStatus: "successful",
+    summary: "One line.", summaryStatus: "successful",
+  }
+  const second = {
+    meetingSoftware: "Google Meet", meetingTitle: "Google Meet", meetingUrl: url,
+    meetingStartTimestamp: "2026-09-23T07:17:50.281Z", meetingEndTimestamp: "2026-09-23T07:31:56.120Z",
+    transcript: [
+      { personName: "Ahmad", timestamp: "2026-09-23T07:17:50.000Z", transcriptText: "Okay mostly expert community is here. So, yeah. Okay, I don't have anything specific." },
+      { personName: "Ahmed", timestamp: "2026-09-23T07:19:00.000Z", transcriptText: "We had the discussions yesterday." },
+    ],
+    chatMessages: [], webhookPostStatus: "new", obsidianPostStatus: "new",
+  }
+  return { first, second }
+}
+
+test("a reload of the same Meet call is a rejoin", () => {
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.isRejoinOf(first, second), true)
+})
+
+test("a different call, a late return, or another platform is not a rejoin", () => {
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingUrl: "https://meet.google.com/xyz-abcd-efg" }), false)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-23T07:40:00.000Z" }), false)
+  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Teams" }, { ...second, meetingSoftware: "Teams" }), false)
+  assert.equal(merge.isRejoinOf({ ...first, meetingUrl: undefined }, second), false)
+  assert.equal(merge.isRejoinOf({ ...first, accountEmail: "a@x.com" }, { ...second, accountEmail: "b@x.com" }), false)
+  assert.equal(merge.isRejoinOf(undefined, second), false)
+})
+
+test("merging keeps one meeting, the real title and the first start time", () => {
+  const { first, second } = rejoinPieces()
+  const merged = merge.mergeRejoin(first, second)
+  assert.equal(merged.meetingTitle, "Meet - Supply Chain Standup")
+  assert.equal(merged.meetingStartTimestamp, first.meetingStartTimestamp)
+  assert.equal(merged.meetingEndTimestamp, second.meetingEndTimestamp)
+  // The cut-off sentence is replaced by its full version, not repeated
+  assert.equal(merged.transcript.length, 2)
+  assert.match(merged.transcript[0].transcriptText, /don't have anything specific/)
+  // The first piece's summary described 17 seconds; it must not pass for the whole call
+  assert.equal(merged.summary, undefined)
+  assert.equal(merged.summaryStatus, undefined)
+  assert.equal(merged.obsidianPostStatus, "new")
+  assert.equal(merged.webhookPostStatus, "new")
+})
+
+test("recovery recognises a piece that was merged in", () => {
+  const { first, second } = rejoinPieces()
+  const merged = merge.mergeRejoin(first, second)
+  assert.equal(merge.coversStartTimestamp(merged, first.meetingStartTimestamp), true)
+  assert.equal(merge.coversStartTimestamp(merged, second.meetingStartTimestamp), true)
+  assert.equal(merge.coversStartTimestamp(merged, "2026-09-24T07:00:00.000Z"), false)
+  assert.equal(merge.coversStartTimestamp(undefined, second.meetingStartTimestamp), false)
+})
+
+test("unrelated last blocks are both kept", () => {
+  const { first, second } = rejoinPieces()
+  const merged = merge.mergeRejoin(first, { ...second, transcript: [{ personName: "Ahmed", timestamp: "x", transcriptText: "Hello" }] })
+  assert.equal(merged.transcript.length, 2)
+})
+
+test("a few seconds of speech is not summarised automatically", () => {
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.hasEnoughToSummarize(first), false)
+  const long = { ...second, transcript: [{ personName: "A", timestamp: "x", transcriptText: "word ".repeat(60) }] }
+  assert.equal(merge.hasEnoughToSummarize(long), true)
+})
+
+test("meeting address ignores the query string", () => {
+  assert.equal(merge.normaliseMeetingUrl("https://meet.google.com/abc-defg-hij?authuser=1"), "https://meet.google.com/abc-defg-hij")
+  assert.equal(merge.normaliseMeetingUrl(undefined), undefined)
+  assert.equal(merge.normaliseMeetingUrl("not a url"), undefined)
 })

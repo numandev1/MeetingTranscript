@@ -1,5 +1,6 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, ResultLocal, ResultSync } from "@lib/types"
 import { processLastMeeting, recoverLastMeeting } from "./meetings"
+import { normaliseMeetingUrl } from "@lib/meeting-merge"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
 import { summarizeAndFileMeeting } from "./summarizer"
@@ -39,7 +40,12 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
         if (typeof meetingTabId === "number") {
             // Clear the previous meeting's account before reading this one, so a failed
             // read cannot file this meeting under the wrong account.
-            chrome.storage.local.set({ meetingTabId: meetingTabId, accountEmail: undefined }, function () {
+            chrome.storage.local.set({
+                meetingTabId: meetingTabId,
+                accountEmail: undefined,
+                // Recorded so a rejoin of the same meeting can be merged into it
+                meetingUrl: normaliseMeetingUrl(sender.tab?.url)
+            }, function () {
                 console.log("Meeting tab id saved")
             })
             captureAccountEmail(meetingTabId)

@@ -1,6 +1,7 @@
 import type { ErrorObject, Meeting, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
 import { DEFAULT_MEETINGS_TO_KEEP } from "@lib/paths"
 import { trimMeetings } from "@lib/retention"
+import { coversStartTimestamp, hasEnoughToSummarize, isRejoinOf, mergeRejoin } from "@lib/meeting-merge"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
 import { postTranscriptToObsidian } from "./obsidian"
 import { summarizeAndFileMeeting } from "./summarizer"
@@ -56,6 +57,16 @@ export function processLastMeeting(): Promise<string> {
                                 // filed before anything that slow and that fragile runs.
                                 if (!resultSync.autoSummarizeAfterMeeting) {
                                     resolve("Meeting processing and download/webhook posting complete")
+                                    return
+                                }
+
+                                // A few seconds before a reload or rejoin are filed as a
+                                // meeting of their own, and summarising those put ChatGPT
+                                // in front mid-call to produce a one-line summary. The
+                                // Summarise button still works on them.
+                                if (!hasEnoughToSummarize(meetings[lastIndex])) {
+                                    console.log("Too little said to summarise automatically")
+                                    resolve("Meeting processing complete, too short to summarise")
                                     return
                                 }
 
@@ -151,6 +162,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
             "liveTranscriptBlock",
             "accountEmail",
             "captionsSeen",
+            "meetingUrl",
         ], function (resultUntyped) {
             const result = resultUntyped as Partial<ResultLocal>
 
@@ -170,7 +182,8 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                         transcript: transcript,
                         chatMessages: chatMessages,
                         webhookPostStatus: "new",
-                        obsidianPostStatus: "new"
+                        obsidianPostStatus: "new",
+                        meetingUrl: result.meetingUrl
                     }
 
                     // Get existing recent meetings and add the new meeting
@@ -179,7 +192,18 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                         chrome.storage.sync.get(["meetingsToKeep"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
                         let meetings = resultLocal.meetings || []
-                        meetings.push(newMeetingEntry)
+
+                        // A reload or rejoin of the same Meet call continues the meeting
+                        // it interrupted. Filed separately, one call became two meetings:
+                        // a few seconds with a one-line summary, and the rest.
+                        const previous = meetings[meetings.length - 1]
+                        if (isRejoinOf(previous, newMeetingEntry)) {
+                            console.log("Rejoined the same meeting, merging into the previous entry")
+                            meetings[meetings.length - 1] = mergeRejoin(previous, newMeetingEntry)
+                        }
+                        else {
+                            meetings.push(newMeetingEntry)
+                        }
 
                         // Trim to the configured limit. trimMeetings has no access to the
                         // vault, downloads or the webhook, so this can only ever drop the
@@ -222,7 +246,7 @@ export function recoverLastMeeting(): Promise<string> {
                 }
 
                 // Last meeting was not processed for some reason. Need to recover that data, process and download it.
-                if ((!lastSavedMeeting) || (resultLocal.meetingStartTimestamp !== lastSavedMeeting.meetingStartTimestamp)) {
+                if (!coversStartTimestamp(lastSavedMeeting, resultLocal.meetingStartTimestamp)) {
                     processLastMeeting().then(() => {
                         resolve("Recovered last meeting to the best possible extent")
                     }).catch((error) => {

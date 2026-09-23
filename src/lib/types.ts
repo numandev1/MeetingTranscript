@@ -85,6 +85,16 @@ export interface Meeting {
   /** Summary produced by ChatGPT, as markdown. */
   summary?: string
   summaryStatus?: "new" | "failed" | "successful"
+  /**
+   * Address of the meeting without its query string. Identifies a Google Meet meeting,
+   * so a reload or rejoin can be merged back into it instead of filed separately.
+   */
+  meetingUrl?: string
+  /**
+   * Start times of later pieces merged into this meeting after a rejoin. The meeting
+   * keeps its first start time, so recovery checks these too.
+   */
+  mergedStartTimestamps?: string[]
 }
 
 /**
@@ -204,6 +214,8 @@ export interface ResultLocal {
   accountEmail: string | undefined
   /** Whether the captions region was seen during the in-progress meeting. */
   captionsSeen: boolean | undefined
+  /** Address of the in-progress meeting, recorded by the background script when it starts. */
+  meetingUrl: string | undefined
   /** Whether the extension has a deferred update waiting to be applied. */
   isDeferredUpdatedAvailable: boolean | undefined
   meetings: Meeting[] | undefined
