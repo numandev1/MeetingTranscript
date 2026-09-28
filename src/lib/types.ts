@@ -310,5 +310,6 @@ export interface ResultSync {
 // | **018** | "Obsidian is not configured" |
 // | **019** | "Could not reach Obsidian. Is the app running with the Local REST API plugin enabled?" |
 // | **020** | "Could not open ChatGPT. Grant access to chatgpt.com and make sure you are signed in." |
+// |         | also "Could not send the prompt to ChatGPT — <reason>" when the tab opened but the composer or send button was not usable |
 // | **021** | "ChatGPT did not return a summary in time" |
 // | **022** | "Nothing to summarise for this meeting" |

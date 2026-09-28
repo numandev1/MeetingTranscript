@@ -37,6 +37,28 @@ const POLL_INTERVAL_MS = 1000
 /** How long to wait for the ChatGPT tab to finish loading before trying anyway. */
 const LOAD_TIMEOUT_MS = 20000
 
+/**
+ * Every ChatGPT DOM hook this module depends on, in one place.
+ *
+ * Each entry lists the current markup and the one before it, so a staged rollout —
+ * where some accounts still get the old UI — works either way. The September 2026
+ * redesign dropped `#prompt-textarea`, the send/stop `data-testid`s and
+ * `data-message-author-role` all at once, and every summary failed at the composer.
+ *
+ * The injected functions run in the page and cannot see module scope, so this object
+ * is passed to them as an argument.
+ */
+const CHATGPT_SELECTORS = {
+    composer: '#prompt-textarea, div.ProseMirror[contenteditable="true"]',
+    sendButton: 'button[data-testid="send-button"], button[aria-label="Send"], button[type="submit"]',
+    stopButton: 'button[data-testid="stop-button"], button[aria-label="Stop"], button[aria-label^="Stop"]',
+    userMessage: '[data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]',
+    assistantMessage: '[data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]',
+    codeBlock: 'pre code, [data-markdown-copy="code-block"] [dir="ltr"]',
+    login: 'a[href*="/auth/login"], button[data-testid="login-button"]'
+}
+type ChatGptSelectors = typeof CHATGPT_SELECTORS
+
 /** The instructions used when the user has not written their own. */
 export const DEFAULT_SUMMARY_INSTRUCTIONS = [
     "Summarise the following meeting transcript. The transcript comes from automatic captions, so expect some transcription errors and ignore them.",
@@ -103,6 +125,11 @@ interface ChatGptTab {
 
 function noAccessError(): ErrorObject {
     return { errorCode: "020", errorMessage: "Could not open ChatGPT. Grant access to chatgpt.com and make sure you are signed in." }
+}
+
+/** The tab opened, but the prompt could not be sent; the reason is read off the page. */
+function notSubmittedError(reason: string): ErrorObject {
+    return { errorCode: "020", errorMessage: `Could not send the prompt to ChatGPT \u2014 ${reason}` }
 }
 
 /**
@@ -223,40 +250,47 @@ async function runInTab<T>(tabId: number, func: (...args: never[]) => T, args: u
  * execCommand: assigning textContent leaves ProseMirror's internal model empty and the
  * send button never becomes available.
  */
-async function submitPrompt(tabId: number, prompt: string): Promise<boolean> {
+type SubmitOutcome = "sent" | "no-composer" | "not-inserted" | "no-send-button"
+
+async function submitPrompt(tabId: number, prompt: string): Promise<SubmitOutcome> {
     // Wait for the composer, which appears well after load on a cold tab
+    let ready = false
     for (let attempt = 0; attempt < 40; attempt++) {
-        const ready = await runInTab(tabId, () => !!document.querySelector("#prompt-textarea"))
+        ready = !!await runInTab(tabId, (selectors: ChatGptSelectors) => !!document.querySelector(selectors.composer), [CHATGPT_SELECTORS])
         if (ready) break
         await new Promise(resolve => setTimeout(resolve, 500))
     }
+    if (!ready) return "no-composer"
 
-    const inserted = await runInTab(tabId, (text: string) => {
-        const composer = document.querySelector<HTMLElement>("#prompt-textarea")
+    const inserted = await runInTab(tabId, (text: string, selectors: ChatGptSelectors) => {
+        const composer = document.querySelector<HTMLElement>(selectors.composer)
         if (!composer) return false
         composer.focus()
         return document.execCommand("insertText", false, text)
-    }, [prompt])
+    }, [prompt, CHATGPT_SELECTORS])
 
-    if (!inserted) return false
+    if (!inserted) return "not-inserted"
 
     // The send button is rendered only once the composer has content, one frame later.
     // The composer is re-checked on every attempt because clicking submit while it is
     // empty triggers a native form GET that navigates the page away.
     for (let attempt = 0; attempt < 20; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 250))
-        const clicked = await runInTab(tabId, () => {
-            const composer = document.querySelector<HTMLElement>("#prompt-textarea")
+        const clicked = await runInTab(tabId, (selectors: ChatGptSelectors) => {
+            const composer = document.querySelector<HTMLElement>(selectors.composer)
             if (!composer || !(composer.innerText || "").trim()) return false
 
-            const button = document.querySelector<HTMLButtonElement>('button[data-testid="send-button"]')
+            // Scoped to the composer's own form: the bare submit fallback must never
+            // match a button belonging to some other form on the page.
+            const scope = composer.closest("form") ?? document
+            const button = scope.querySelector<HTMLButtonElement>(selectors.sendButton)
             if (!button || button.disabled) return false
             button.click()
             return true
-        })
-        if (clicked) return true
+        }, [CHATGPT_SELECTORS])
+        if (clicked) return "sent"
     }
-    return false
+    return "no-send-button"
 }
 
 /**
@@ -268,20 +302,20 @@ async function submitPrompt(tabId: number, prompt: string): Promise<boolean> {
  * signals are read here instead and travel with the error.
  */
 async function describeFailure(tabId: number): Promise<string> {
-    const found = await runInTab(tabId, () => {
+    const found = await runInTab(tabId, (selectors: ChatGptSelectors) => {
         const text = document.body.textContent || ""
-        const signedOut = !!document.querySelector('a[href*="/auth/login"], button[data-testid="login-button"]')
+        const signedOut = !!document.querySelector(selectors.login)
         const alerts = [...document.querySelectorAll<HTMLElement>('[role="alert"], [class*="text-token-text-error"]')]
             .map(node => (node.textContent || "").trim())
             .filter(message => message.length > 0)
         return {
             signedOut: signedOut,
-            sentPrompt: document.querySelectorAll('[data-message-author-role="user"]').length > 0,
-            gotAnswer: document.querySelectorAll('[data-message-author-role="assistant"]').length > 0,
+            sentPrompt: document.querySelectorAll(selectors.userMessage).length > 0,
+            gotAnswer: document.querySelectorAll(selectors.assistantMessage).length > 0,
             alert: alerts[0]?.slice(0, 160) ?? "",
             rateLimited: /reached (our|the) limit|too many requests|usage limit/i.test(text)
         }
-    })
+    }, [CHATGPT_SELECTORS])
 
     if (!found) return "the ChatGPT tab could not be read"
     if (found.signedOut) return "you are signed out of ChatGPT"
@@ -339,16 +373,16 @@ async function readResponse(tabId: number, onStreaming: () => void): Promise<Ans
         // The page hands back both readings unchosen; picking between them happens in
         // pickAnswerText, where it can be tested. textContent rather than innerText
         // because it needs no layout, and this tab is deliberately not in front.
-        const raw = await runInTab(tabId, () => {
-            const messages = document.querySelectorAll<HTMLElement>('[data-message-author-role="assistant"]')
+        const raw = await runInTab(tabId, (selectors: ChatGptSelectors) => {
+            const messages = document.querySelectorAll<HTMLElement>(selectors.assistantMessage)
             const last = messages[messages.length - 1]
-            const codeBlock = last?.querySelector<HTMLElement>("pre code")
+            const codeBlock = last?.querySelector<HTMLElement>(selectors.codeBlock)
             return {
                 codeBlockText: codeBlock?.textContent ?? "",
                 messageText: last?.textContent ?? "",
-                busy: !!document.querySelector('button[data-testid="stop-button"]')
+                busy: !!document.querySelector(selectors.stopButton)
             }
-        })
+        }, [CHATGPT_SELECTORS])
 
         if (!raw) {
             failedReads++
@@ -435,8 +469,19 @@ export function summarizeMeeting(index: number): Promise<string> {
                 tab = await openChatGptTab()
                 const submitted = await submitPrompt(tab.tabId, buildSummaryPrompt(meeting, instructions))
 
-                if (!submitted) {
-                    throw noAccessError() satisfies ErrorObject
+                if (submitted === "no-composer") {
+                    // Signed out and a changed page both look like "no composer"; the
+                    // page says which, and a changed page is what to fix in CHATGPT_SELECTORS.
+                    const reason = await describeFailure(tab.tabId)
+                    throw notSubmittedError(reason === "you are signed out of ChatGPT"
+                        ? reason
+                        : "the message box was not found (ChatGPT's page may have changed)") satisfies ErrorObject
+                }
+                if (submitted === "not-inserted") {
+                    throw notSubmittedError("the transcript could not be typed into the message box") satisfies ErrorObject
+                }
+                if (submitted === "no-send-button") {
+                    throw notSubmittedError("the send button was not found or stayed disabled") satisfies ErrorObject
                 }
 
                 const openedTab = tab

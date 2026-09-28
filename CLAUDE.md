@@ -116,7 +116,7 @@ The setting is off until the user turns it on, and the toggle itself is the cons
 
 `meetingTabId` deliberately stays `"processing"` for the whole summary. That defers an extension update that would otherwise reload the service worker mid-run and lose the answer. The polling also **is** the service worker's keepalive: a `chrome.*` call every second holds it past its idle timeout, which is why the tab-load wait polls `chrome.tabs.get` instead of sleeping on one long `setTimeout` — the automatic run has no open message port to keep the worker up.
 
-This is the most fragile part of the codebase: it depends on selectors in a page nobody here controls. `#prompt-textarea`, `button[data-testid="send-button"]`, `button[data-testid="stop-button"]` and `[data-message-author-role="assistant"]` are the four to re-check when summaries stop working.
+This is the most fragile part of the codebase: it depends on selectors in a page nobody here controls. They all live in `CHATGPT_SELECTORS` at the top of `summarizer.ts`, each listing the current markup alongside the previous one so a staged rollout works either way — that object is the first place to look when summaries stop working. The September 2026 redesign removed `#prompt-textarea`, the send/stop `data-testid`s and `data-message-author-role` in one go; a missing composer now reports 020 as "Could not send the prompt to ChatGPT — the message box was not found" rather than the permission message it used to borrow.
 
 ### Importing transcript files
 
