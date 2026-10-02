@@ -25,7 +25,16 @@
     "sidePanel"
   ],
   "host_permissions": [
-    "https://meet.google.com/*"
+    "https://meet.google.com/*",
+    "https://chat.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://chat.google.com/*"],
+      "js": ["contentGoogleMeetChat.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
   ],
   "optional_permissions": [
     "notifications"

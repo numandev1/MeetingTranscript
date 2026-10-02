@@ -154,6 +154,7 @@ export type ExtensionMessageType =
   | "open_popup"
   | "open_side_panel"
   | "broadcast_live_buffer"
+  | "meet_embedded_chat_messages"
 
 /** Message sent by the calling script. */
 export interface ExtensionMessage {
@@ -162,6 +163,14 @@ export interface ExtensionMessage {
   index?: number
   platform?: Platform | Platform[]
   stateTranscriptBlock?: StateTranscriptBlock
+  /** Messages read from Meet's embedded Google Chat iframe, relayed to the meeting frame. */
+  embeddedChatMessages?: EmbeddedChatMessage[]
+}
+
+/** A chat message read inside Meet's chat.google.com iframe, keyed for de-duplication. */
+export interface EmbeddedChatMessage extends ChatMessage {
+  /** Google Chat message id (data-id), stable across re-renders. */
+  messageId: string
 }
 
 /** Response sent by the called script. */

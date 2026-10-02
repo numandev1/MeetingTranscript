@@ -19,6 +19,9 @@ const config = {
     // One bundle per platform. These are injected by chrome.scripting at runtime,
     // so their names must match PLATFORM_CONFIGS in src/background-script/config.ts.
     contentGoogleMeet: path.join(__dirname, 'src', 'pages', 'ContentGoogleMeet', 'index.ts'),
+    // Declared statically in manifest.json (not registered at runtime): runs inside
+    // Meet's embedded chat.google.com iframe and relays messages to contentGoogleMeet.
+    contentGoogleMeetChat: path.join(__dirname, 'src', 'pages', 'ContentGoogleMeetChat', 'index.ts'),
     contentTeams: path.join(__dirname, 'src', 'pages', 'ContentTeams', 'index.ts'),
     contentZoom: path.join(__dirname, 'src', 'pages', 'ContentZoom', 'index.ts'),
     // Extension UI

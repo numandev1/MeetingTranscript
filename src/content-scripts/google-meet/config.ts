@@ -13,5 +13,24 @@ export const SELECTORS_GOOGLE_MEET = {
     // Every chat message carries a stable id like "spaces/<id>/messages/<id>"
     CHAT_MESSAGE: "[data-message-id]",
     // Sender name + timestamp header, once per run of consecutive messages
-    CHAT_GROUP_HEADER: ".HNucUd"
+    CHAT_GROUP_HEADER: ".HNucUd",
+    // Newer Meet renders chat in this iframe instead of CHAT_LIVE_REGION
+    EMBEDDED_CHAT_IFRAME: 'iframe[src*="chat.google.com"]'
+}
+
+/**
+ * Since late Sep 2026 Meet renders chat inside a cross-origin Google Chat iframe
+ * (chat.google.com/.../embed/space/...), so none of the CHAT_* selectors above exist in
+ * the Meet document any more. These are read by the content script running inside that
+ * iframe (see embedded-chat.ts).
+ */
+export const SELECTORS_GOOGLE_MEET_EMBEDDED_CHAT = {
+    // One per message; data-id is the Google Chat message id
+    MESSAGE: 'div[role="group"][data-id]',
+    // Sender chip, only rendered on the first message of a run from the same person
+    SENDER: "[data-message-id][data-name]",
+    // Epoch milliseconds the message was sent
+    TIMESTAMP: "[data-absolute-timestamp]",
+    // Message body
+    BODY: ".DTp27d"
 }

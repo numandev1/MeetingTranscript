@@ -30,6 +30,21 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
     const message = messageUnTyped as ExtensionMessage
     console.log(message.type)
 
+    // Chat now lives in a cross-origin chat.google.com iframe inside the Meet tab. Its
+    // content script cannot reach the Meet frame's script directly, so hand the batch to
+    // the tab's top frame, where the meeting state lives.
+    if (message.type === "meet_embedded_chat_messages") {
+        const tabId = sender.tab?.id
+        if (typeof tabId !== "number") {
+            sendResponse({ success: false, message: "No sender tab" } satisfies ExtensionResponse)
+            return false
+        }
+        chrome.tabs.sendMessage(tabId, message, { frameId: 0 })
+            .then(() => sendResponse({ success: true } satisfies ExtensionResponse))
+            .catch((err) => sendResponse({ success: false, message: String(err) } satisfies ExtensionResponse))
+        return true
+    }
+
     if (message.type === "new_meeting_started") {
         // Saving the sending tab's id, to download transcript when this tab is closed.
         // It must come from the sender rather than a query for the active tab: the

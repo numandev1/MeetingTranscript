@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentScriptState, ErrorObject, ExtensionMessage, ResultSync } from "@lib/types"
+import type { ChatMessage, ContentScriptState, ErrorObject, ExtensionMessage, ExtensionResponse, ResultSync } from "@lib/types"
 import { extensionStatusJSON_bug, mutationConfig, reportErrorMessage } from "../common-config"
 import {
     applyParticipantNameSetting,
@@ -38,6 +38,7 @@ export function initGoogleMeet(): void {
         applyParticipantNameSetting(state)
         // Push fresh state to chrome storage
         overWriteChromeStorage(state, ["meetingSoftware", "meetingStartTimestamp", "meetingTitle", "transcript", "chatMessages"], false)
+        listenForEmbeddedChatMessages(state)
         // Drop any buffer left over from a meeting that was never picked up
         clearLiveBuffer()
 
@@ -149,12 +150,21 @@ function googleMeetRoutines(state: ContentScriptState): void {
                 chatMessagesButton?.click()
 
                 // Allow DOM to be updated. Once updated, next "then" block will be executed.
-                return waitForElement(SELECTORS_GOOGLE_MEET.CHAT_LIVE_REGION)
+                // Whichever chat implementation this meeting uses appears first.
+                return waitForElement(`${SELECTORS_GOOGLE_MEET.CHAT_LIVE_REGION}, ${SELECTORS_GOOGLE_MEET.EMBEDDED_CHAT_IFRAME}`)
                     .then(targetNode => ({ targetNode, chatMessagesButton }))
             })
             .then(({ targetNode, chatMessagesButton }) => {
                 // Click again to close the chat messages
                 chatMessagesButton?.click()
+
+                // Embedded Google Chat: the iframe's own content script reads the messages
+                // and they arrive through listenForEmbeddedChatMessages(), so there is no
+                // Meet-side DOM to observe.
+                if (targetNode.matches(SELECTORS_GOOGLE_MEET.EMBEDDED_CHAT_IFRAME)) {
+                    console.log("Chat is an embedded Google Chat iframe; relying on relayed messages")
+                    return
+                }
                 // CRITICAL DOM DEPENDENCY. Grab the chat messages element. This element is present, irrespective of chat ON/OFF, once it appears for this first time.
                 state.chatMessagesTargetNode = targetNode
 
@@ -382,6 +392,37 @@ function getChatMessageText(messageElement: Element): string {
         container.remove()
     })
     return (clone.innerText || "").trim()
+}
+
+/**
+ * Receives messages read by the content script inside Meet's embedded Google Chat
+ * iframe, relayed to this frame by the background script, and stores new ones.
+ */
+function listenForEmbeddedChatMessages(state: ContentScriptState): void {
+    chrome.runtime.onMessage.addListener((messageUnTyped, _sender, sendResponse) => {
+        const message = messageUnTyped as ExtensionMessage
+        if (message.type !== "meet_embedded_chat_messages") {
+            return
+        }
+        // Acknowledged either way, so the iframe stops resending a batch the meeting no longer wants
+        sendResponse({ success: true } satisfies ExtensionResponse)
+        if (state.hasMeetingEnded) {
+            return
+        }
+        for (const chatMessage of message.embeddedChatMessages ?? []) {
+            // Prefixed so these ids can never collide with legacy data-message-id values
+            const messageId = `embedded:${chatMessage.messageId}`
+            if (state.capturedChatMessageIds.includes(messageId)) {
+                continue
+            }
+            state.capturedChatMessageIds.push(messageId)
+            pushChatBlock(state, {
+                personName: chatMessage.personName,
+                timestamp: chatMessage.timestamp,
+                chatMessageText: chatMessage.chatMessageText
+            })
+        }
+    })
 }
 
 /** Callback function to execute when chat messages mutations are observed. */
