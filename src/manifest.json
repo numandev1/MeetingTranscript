@@ -8,13 +8,21 @@
     "email": "muhammadnuman70@gmail.com"
   },
   "action": {
-    "default_icon": "icon.png",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icon.png"
+    },
     "default_popup": "popup.html"
   },
   "side_panel": {
     "default_path": "side-panel.html"
   },
   "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
     "128": "icon.png"
   },
   "permissions": [

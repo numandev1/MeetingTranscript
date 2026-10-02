@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B54EE"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)"/>
+  <!-- live audio -->
+  <g fill="#FFFFFF">
+    <rect x="29" y="41" width="7" height="12" rx="3.5"/>
+    <rect x="40" y="35" width="7" height="24" rx="3.5"/>
+    <rect x="51" y="29" width="7" height="36" rx="3.5"/>
+    <rect x="62" y="37" width="7" height="20" rx="3.5"/>
+    <rect x="73" y="42" width="7" height="10" rx="3.5"/>
+  </g>
+  <!-- becomes text -->
+  <rect x="29" y="74" width="70" height="9" rx="4.5" fill="#FFFFFF"/>
+  <rect x="29" y="91" width="46" height="9" rx="4.5" fill="#FFFFFF" fill-opacity="0.72"/>
+  <!-- recording -->
+  <circle cx="95" cy="47" r="8" fill="#34D399"/>
+</svg>
