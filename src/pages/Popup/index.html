@@ -34,6 +34,11 @@
       font-size: var(--text-xs);
     }
 
+    .popup-header .btn {
+      margin-left: auto;
+      text-decoration: none;
+    }
+
     .popup-section {
       padding: var(--space-4) var(--space-5);
       border-top: 1px solid var(--border);
@@ -130,6 +135,8 @@
       <h1>MeetingTranscript</h1>
       <p class="sub-text">Private meeting transcripts, on your device</p>
     </div>
+    <!-- Up here so the most used action never needs a scroll -->
+    <a class="btn btn-primary btn-sm" href="./meetings.html" target="_blank">Meetings</a>
   </header>
 
   <section class="popup-section">
