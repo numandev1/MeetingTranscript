@@ -3,7 +3,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
-import * as summaryText from "../src/lib/summary-text.ts"
 
 const require = createRequire(import.meta.url)
 const paths = require("../.test-build/lib/paths.js")
@@ -11,6 +10,7 @@ const transfer = require("../.test-build/lib/settings-transfer.js")
 const importer = require("../.test-build/lib/transcript-import.js")
 const retention = require("../.test-build/lib/retention.js")
 const merge = require("../.test-build/lib/meeting-merge.js")
+const summaryText = require("../.test-build/lib/summary-text.js")
 
 const { getFolderPrefix, withAccountSubfolder, DEFAULT_OBSIDIAN_FOLDER, DEFAULT_DOWNLOAD_SUBFOLDER } = paths
 

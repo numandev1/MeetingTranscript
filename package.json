@@ -9,7 +9,7 @@
     "start": "node utils/watch.js",
     "check": "tsc -p tsconfig.json --noEmit",
     "pretest": "tsc -p tsconfig.json --outDir .test-build --module commonjs --moduleResolution node --noEmit false --declaration false",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.mjs\"",
     "check:selectors": "node scripts/check-selectors.mjs",
     "format": "prettier --write \"src/**/*.{ts,css,html}\" \"test/**/*.mjs\" \"scripts/**/*.mjs\"",
     "format:check": "prettier --check \"src/**/*.{ts,css,html}\"",
