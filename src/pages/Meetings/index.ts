@@ -4,6 +4,7 @@ import { DEFAULT_OBSIDIAN_BASE_URL } from "../../background-script/obsidian"
 import { parseTranscriptFile } from "@lib/transcript-import"
 import { meetingsDroppedBy, trimMeetings } from "@lib/retention"
 import { DEFAULT_SUMMARY_INSTRUCTIONS } from "../../background-script/summarizer"
+import { parseSummaryMarkdown, type InlineRun } from "@lib/summary-markdown"
 import {
     buildSettingsFile,
     getWantedPlatforms,
@@ -11,8 +12,6 @@ import {
     TRANSFERABLE_SYNC_KEYS,
     withObsidianEnabled,
 } from "@lib/settings-transfer"
-
-let isMeetingsTableExpanded = false
 
 document.addEventListener("DOMContentLoaded", function () {
     const webhookUrlForm = document.querySelector("#webhook-url-form")
@@ -23,7 +22,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const simpleWebhookBodyRadio = document.querySelector("#simple-webhook-body")
     const advancedWebhookBodyRadio = document.querySelector("#advanced-webhook-body")
     const recoverLastMeetingButton = document.querySelector("#recover-last-meeting")
-    const showAllButton = document.querySelector("#show-all")
     const downloadFolderForm = document.querySelector("#download-folder-form")
     const downloadFolderInput = document.querySelector("#download-folder")
 
@@ -217,14 +215,7 @@ document.addEventListener("DOMContentLoaded", function () {
     showRecentErrors()
     setupObsidianSettings()
 
-    if (showAllButton instanceof HTMLButtonElement) {
-        showAllButton.addEventListener("click", () => {
-            const meetingsTableContainer = document.querySelector("#meetings-table-container")
-            meetingsTableContainer?.classList.remove("fade-mask")
-            showAllButton.setAttribute("style", "display:none;")
-            isMeetingsTableExpanded = true
-        })
-    }
+    setupViews()
 
     // handlePermissions()
 })
@@ -282,9 +273,9 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
     titleElement.textContent = focus === "summary" ? `${meetingName} — summary` : meetingName
     metaElement.textContent = [
         meeting.meetingSoftware,
-        new Date(meeting.meetingStartTimestamp).toLocaleString(),
+        formatWhen(meeting.meetingStartTimestamp),
         getDuration(meeting.meetingStartTimestamp, meeting.meetingEndTimestamp)
-    ].filter(part => part).join("  •  ")
+    ].filter(part => part).join("  ·  ")
 
     bodyElement.innerHTML = ""
     if (meeting.summary) {
@@ -297,15 +288,12 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
         // is the screen where a truncated summary was read as the real one.
         if (meeting.summaryStatus === "failed") {
             const warning = document.createElement("p")
-            warning.className = "status status-failed"
+            warning.className = "status status-failed dialog-warning"
             warning.textContent = "The last attempt to summarise failed. This is from an earlier attempt and may be cut short — summarise again to replace it."
             bodyElement.appendChild(warning)
         }
 
-        const summaryElement = document.createElement("p")
-        summaryElement.className = "dialog-block-text"
-        summaryElement.textContent = meeting.summary
-        bodyElement.appendChild(summaryElement)
+        bodyElement.appendChild(buildSummaryDocument(meeting.summary))
     }
     else if (focus === "summary") {
         const empty = document.createElement("p")
@@ -400,6 +388,59 @@ function openTranscriptDialog(meeting: Meeting, index: number, focus: "transcrip
     }
 
     dialog.showModal()
+}
+
+/** Appends inline runs as text nodes, with bold spans as <strong>. Never markup. */
+function appendRuns(parent: HTMLElement, runs: InlineRun[]): void {
+    runs.forEach(run => {
+        if (run.bold) {
+            const strong = document.createElement("strong")
+            strong.textContent = run.text
+            parent.appendChild(strong)
+        }
+        else {
+            parent.appendChild(document.createTextNode(run.text))
+        }
+    })
+}
+
+/** Renders a summary's markdown structure, so the viewer shows headings and lists rather than `##` and `-`. */
+function buildSummaryDocument(summary: string): HTMLElement {
+    const doc = document.createElement("div")
+    doc.className = "summary-doc"
+
+    const blocks = parseSummaryMarkdown(summary)
+    // The section is already labelled Summary; a leading "## Summary" would say it twice
+    const first = blocks[0]
+    if (first?.kind === "heading" && first.runs.map(run => run.text).join("").trim().toLowerCase() === "summary") {
+        blocks.shift()
+    }
+
+    blocks.forEach(block => {
+        if (block.kind === "list") {
+            const list = document.createElement("ul")
+            block.items.forEach(item => {
+                const li = document.createElement("li")
+                if (item.checked !== undefined) {
+                    const box = document.createElement("input")
+                    box.type = "checkbox"
+                    box.checked = item.checked
+                    box.disabled = true
+                    li.appendChild(box)
+                    li.style.listStyle = "none"
+                }
+                appendRuns(li, item.runs)
+                list.appendChild(li)
+            })
+            doc.appendChild(list)
+            return
+        }
+        const element = document.createElement(block.kind === "heading" ? "h4" : "p")
+        appendRuns(element, block.runs)
+        doc.appendChild(element)
+    })
+
+    return doc
 }
 
 /** One titled group of speaker blocks, or a placeholder when there is nothing to show. */
@@ -1056,61 +1097,23 @@ function loadMeetings(): void {
                 // Loop through the array in reverse order to list latest meeting first
                 for (let i = meetings.length - 1; i >= 0; i--) {
                     const meeting = meetings[i]
-                    const timestamp = new Date(meeting.meetingStartTimestamp).toLocaleString()
                     const durationString = getDuration(meeting.meetingStartTimestamp, meeting.meetingEndTimestamp)
 
                     const row = document.createElement("tr")
                     row.innerHTML = `
                     <td>
-                        <div contenteditable="true" class="meeting-title" data-index="${i}" title="Rename">
-                        ${escapeHtml(meeting.meetingTitle || meeting.title || "Google Meet call")}
-                    </div>
+                        <div contenteditable="true" class="meeting-title" data-index="${i}" title="Rename">${escapeHtml(meeting.meetingTitle || meeting.title || "Google Meet call")}</div>
+                        <div class="meeting-meta">${[meeting.meetingSoftware ?? "", formatWhen(meeting.meetingStartTimestamp), durationString]
+                            .filter(part => part).map(escapeHtml).join(" &middot; ")}${
+                            meeting.transcript.length === 0 && meeting.captionsSeen === false
+                                ? `<span class="status status-failed" title="The captions panel never appeared, so nothing could be captured">Captions never started</span>`
+                                : meeting.transcript.length === 0
+                                    ? `<span class="status status-new" title="Capture ran, but nobody spoke with captions on">No speech captured</span>`
+                                    : ``
+                        }</div>
                     </td>
                     <td>
-                     ${escapeHtml(meeting.meetingSoftware ?? "")} 
-                    </td>
-                    <td>${escapeHtml(timestamp)} &nbsp; &#9679; &nbsp; ${escapeHtml(durationString)}${
-                        meeting.transcript.length === 0 && meeting.captionsSeen === false
-                            ? `<br><span class="status status-failed" title="The captions panel never appeared, so nothing could be captured">Captions never started</span>`
-                            : meeting.transcript.length === 0
-                                ? `<br><span class="status status-new" title="Capture ran, but nobody spoke with captions on">No speech captured</span>`
-                                : ``
-                    }</td>
-                    <td>
-                        ${(
-                            () => {
-                                switch (meeting.webhookPostStatus) {
-                                    case "successful":
-                                        return `<span class="status status-success">Successful</span>`
-                                    case "failed":
-                                        return `<span class="status status-failed">Failed</span>`
-                                    case "new":
-                                        return `<span class="status status-new">New</span>`
-                                    default:
-                                        return `<span class="status status-new">Unknown</span>`
-                                }
-                            }
-                        )()}
-                    </td>
-                    <td>
-                        ${(
-                            () => {
-                                switch (meeting.obsidianPostStatus) {
-                                    case "successful":
-                                        return `<span class="status status-success">Saved</span>`
-                                    case "failed":
-                                        return `<span class="status status-failed">Failed</span> <button class="obsidian-button" data-index="${i}" title="Retry saving to Obsidian">Retry</button>`
-                                    default:
-                                        return `<button class="obsidian-button" data-index="${i}" title="Save this meeting to Obsidian">Save</button>`
-                                }
-                            }
-                        )()}
-                    </td>
-                    <td>
-                        <div class="row-actions">
-                            <button class="view-button" data-index="${i}" title="View transcript" aria-label="View this meeting transcript">
-                                <span class="icon icon-view"></span>
-                            </button>
+                        <div class="stack">
                             ${meeting.summary ? `<button class="view-summary-button" data-index="${i}" title="${
                                 // A failed attempt leaves the previous summary in place rather than
                                 // destroying one that may have been good. That is only safe if the
@@ -1118,23 +1121,56 @@ function loadMeetings(): void {
                                 // the current one, which is exactly how a truncated summary went
                                 // unnoticed.
                                 meeting.summaryStatus === "failed"
-                                    ? `The last attempt to summarise failed \u2014 this is from an earlier one`
+                                    ? `The last attempt to summarise failed — this is from an earlier one`
                                     : `View summary`
                             }" aria-label="View this meeting summary">
-                                Summary${meeting.summaryStatus === "failed" ? ` <span class="status status-failed">stale</span>` : ``}
-                            </button>` : `<span class="summary-slot"></span>`}
-                            <button class="summarize-button" data-index="${i}" title="${meeting.summary ? `Re-summarise with ChatGPT` : `Summarise with ChatGPT`}" aria-label="Summarise this meeting with ChatGPT">
-                                ${meeting.summary ? `Re-summarise` : `Summarise`}
+                                View${meeting.summaryStatus === "failed" ? ` <span class="status status-failed">stale</span>` : ``}
+                            </button>` : ``}
+                            <button class="summarize-button${meeting.summary ? ` is-redo` : ``}" data-index="${i}" title="${meeting.summary ? `Summarise again with ChatGPT` : `Summarise with ChatGPT`}" aria-label="${meeting.summary ? `Summarise this meeting again with ChatGPT` : `Summarise this meeting with ChatGPT`}">
+                                ${meeting.summary ? `Redo` : `Summarise`}
+                            </button>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="stack">
+                            ${(
+                                () => {
+                                    switch (meeting.webhookPostStatus) {
+                                        case "successful":
+                                            return `<span class="status status-success" title="Posted to your webhook">Webhook</span>`
+                                        case "failed":
+                                            return `<span class="status status-failed" title="Posting to your webhook failed — use the webhook button to retry">Webhook failed</span>`
+                                        default:
+                                            return ``
+                                    }
+                                }
+                            )()}
+                            ${(
+                                () => {
+                                    switch (meeting.obsidianPostStatus) {
+                                        case "successful":
+                                            return `<span class="status status-success" title="Saved as a note in your vault">Obsidian</span>`
+                                        case "failed":
+                                            return `<span class="status status-failed">Obsidian failed</span> <button class="obsidian-button" data-index="${i}" title="Retry saving to Obsidian">Retry</button>`
+                                        default:
+                                            return `<button class="obsidian-button" data-index="${i}" title="Save this meeting to Obsidian">Save to Obsidian</button>`
+                                    }
+                                }
+                            )()}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="row-actions">
+                            <button class="view-button" data-index="${i}" title="View transcript" aria-label="View this meeting transcript">
+                                <span class="icon icon-view"></span>
                             </button>
                             <button class="download-button" data-index="${i}" title="Download" aria-label="Download this meeting transcript">
                                 <span class="icon icon-download"></span>
                             </button>
-                            <button class="post-button" data-index="${i}" title="${meeting.webhookPostStatus === "new" ? `Post webhook` : `Repost webhook`}" aria-label="${meeting.webhookPostStatus === "new" ? `` : ``}">
-                                ${meeting.webhookPostStatus === "new" ? `` : ``}
+                            <button class="post-button" data-index="${i}" title="${meeting.webhookPostStatus === "new" ? `Post to webhook` : `Post to webhook again`}" aria-label="${meeting.webhookPostStatus === "new" ? `Post this meeting to the webhook` : `Post this meeting to the webhook again`}">
                                 <span class="icon icon-webhook"></span>
                             </button>
-                            &nbsp;
-                             <button class="delete-button" data-index="${i}" title="Delete" aria-label="Delete this meeting">
+                            <button class="delete-button" data-index="${i}" title="Delete" aria-label="Delete this meeting">
                                 <span class="icon icon-delete"></span>
                             </button>
                         </div>
@@ -1327,14 +1363,9 @@ function loadMeetings(): void {
                         })
                     }
                 }
-                const meetingsTableContainer = document.querySelector("#meetings-table-container")
-                if (!isMeetingsTableExpanded && meetingsTableContainer && (meetingsTableContainer.clientHeight > 280)) {
-                    meetingsTableContainer?.classList.add("fade-mask")
-                    document.querySelector("#show-all")?.setAttribute("style", "display: block")
-                }
             }
             else {
-                meetingsTable.innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>No meetings yet</strong>Join a meeting with captions on and the transcript appears here automatically.<br><br>Worth setting up first: your name, so your own speech is not labelled &ldquo;You&rdquo;, and Obsidian or a webhook if you want transcripts to land somewhere else. All below.</div></td></tr>`
+                meetingsTable.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>No meetings yet</strong>Join a meeting with captions on and the transcript appears here automatically.<br><br>Worth setting up first: <a href="#settings-you">your name</a>, so your own speech is not labelled &ldquo;You&rdquo;, and <a href="#settings-obsidian">Obsidian</a> or a <a href="#settings-webhook">webhook</a> if you want transcripts to land somewhere else.</div></td></tr>`
             }
         }
     })
@@ -1434,4 +1465,62 @@ function getDuration(meetingStartTimestamp: string, meetingEndTimestamp: string)
     return durationHours > 0
         ? `${durationHours}h ${remainingMinutes}m`
         : `${durationMinutes}m`
+}
+
+/** "Thu 2 Oct, 14:30" in the user's locale — the weekday is what people scan a meeting list by. */
+function formatWhen(isoTimestamp: string): string {
+    return new Date(isoTimestamp).toLocaleString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
+    })
+}
+
+/**
+ * Switches between the Meetings and Settings views from the address hash, so the popup
+ * can link straight to a settings group and the back button behaves. `#webhooks` is the
+ * address older builds of the popup linked to, and still lands on Settings.
+ */
+function setupViews(): void {
+    const meetingsView = document.querySelector<HTMLElement>("#view-meetings")
+    const settingsView = document.querySelector<HTMLElement>("#view-settings")
+    const tabs = document.querySelectorAll<HTMLAnchorElement>(".tab")
+    const groupLinks = document.querySelectorAll<HTMLAnchorElement>(".settings-nav a")
+    if (!meetingsView || !settingsView) return
+
+    function show() {
+        const hash = location.hash.slice(1)
+        const isSettings = hash === "settings" || hash === "webhooks" || hash.startsWith("settings-")
+        meetingsView!.hidden = isSettings
+        settingsView!.hidden = !isSettings
+        tabs.forEach(tab => {
+            if ((tab.dataset.view === "settings") === isSettings) tab.setAttribute("aria-current", "page")
+            else tab.removeAttribute("aria-current")
+        })
+
+        const target = hash === "webhooks" ? "settings-webhook" : hash
+        const group = target.startsWith("settings-") ? document.getElementById(target) : null
+        if (group) group.scrollIntoView({ block: "start" })
+        else window.scrollTo({ top: 0 })
+    }
+
+    window.addEventListener("hashchange", show)
+    show()
+
+    // Marks the settings group currently at the top of the viewport in the side nav
+    const groups = Array.from(document.querySelectorAll<HTMLElement>(".settings-group"))
+    const observer = new IntersectionObserver(() => {
+        const offset = 120
+        let current = groups[0]
+        groups.forEach(group => {
+            if (group.getBoundingClientRect().top - offset <= 0) current = group
+        })
+        groupLinks.forEach(link => {
+            if (link.getAttribute("href") === `#${current?.id}`) link.setAttribute("aria-current", "true")
+            else link.removeAttribute("aria-current")
+        })
+    }, { rootMargin: "-120px 0px -60% 0px", threshold: [0, 1] })
+    groups.forEach(group => observer.observe(group))
 }

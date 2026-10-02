@@ -333,3 +333,25 @@ test("meeting address ignores the query string", () => {
   assert.equal(merge.normaliseMeetingUrl(undefined), undefined)
   assert.equal(merge.normaliseMeetingUrl("not a url"), undefined)
 })
+
+const summaryMarkdown = require("../.test-build/lib/summary-markdown.js")
+
+test("summary markdown is read into headings, paragraphs and lists", () => {
+  const blocks = summaryMarkdown.parseSummaryMarkdown(
+    "## Summary\nRollout is on track.\nSecond line.\n\n## Action items\n- [ ] **Numan**: review schema\n- [x] Ship it\n\n1. First\n2. Second"
+  )
+  assert.deepEqual(blocks.map(b => b.kind), ["heading", "paragraph", "heading", "list", "list"])
+  assert.equal(blocks[1].runs[0].text, "Rollout is on track. Second line.")
+  assert.deepEqual(blocks[3].items[0], {
+    runs: [{ text: "Numan", bold: true }, { text: ": review schema", bold: false }],
+    checked: false,
+  })
+  assert.equal(blocks[3].items[1].checked, true)
+  assert.equal(blocks[4].items.length, 2)
+})
+
+test("summary markdown never turns text into markup", () => {
+  const [block] = summaryMarkdown.parseSummaryMarkdown("<img src=x onerror=alert(1)> **unclosed")
+  assert.equal(block.kind, "paragraph")
+  assert.deepEqual(block.runs, [{ text: "<img src=x onerror=alert(1)> **unclosed", bold: false }])
+})

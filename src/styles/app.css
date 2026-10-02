@@ -5,41 +5,57 @@
    ========================================================================= */
 
 :root {
-    /* --- Surfaces -------------------------------------------------------
-       Layered rather than one flat fill, so panels read as raised without
-       needing borders everywhere. Hues all sit on the brand's teal axis. */
-    --bg: oklch(0.19 0.022 235);
-    --surface: oklch(0.225 0.024 235);
-    --surface-raised: oklch(0.265 0.026 235);
-    --surface-hover: oklch(0.30 0.028 235);
+    /* Follows the operating system. Light is the base; the dark set below
+       overrides only colour, so spacing, type and motion stay shared. Native
+       controls (checkboxes, scrollbars, date pickers) follow along. */
+    color-scheme: light dark;
 
-    --border: oklch(0.33 0.028 235);
-    --border-strong: oklch(0.45 0.035 235);
+    /* --- Surfaces -------------------------------------------------------
+       Neutral graphite, tinted a hair toward the accent's hue so greys and
+       indigo read as one family rather than two. */
+    --bg: oklch(0.975 0.002 277);
+    --surface: oklch(1 0 0);
+    --surface-raised: oklch(0.962 0.003 277);
+    --surface-hover: oklch(0.945 0.004 277);
+
+    --border: oklch(0.912 0.004 277);
+    --border-strong: oklch(0.83 0.006 277);
 
     /* --- Ink ------------------------------------------------------------
-       Three steps only. Every one clears 4.5:1 on --bg and on --surface,
-       including the subtle step, which is also the placeholder colour. */
-    --ink: oklch(0.97 0.004 235);
-    --ink-muted: oklch(0.80 0.012 235);
-    --ink-subtle: oklch(0.68 0.016 235);
+       Three steps. Every one clears 4.5:1 on --bg and --surface, including
+       the subtle step, which is also the placeholder colour. */
+    --ink: oklch(0.21 0.006 277);
+    --ink-muted: oklch(0.39 0.008 277);
+    --ink-subtle: oklch(0.50 0.010 277);
 
     /* --- Brand ----------------------------------------------------------
-       The existing cyan, kept as the product's identity. Used for primary
-       actions, selection and focus only. Never decoration. */
-    --accent: oklch(0.70 0.115 232);
-    --accent-hover: oklch(0.76 0.115 232);
-    --accent-press: oklch(0.64 0.115 232);
-    --accent-ink: oklch(0.17 0.03 235);
-    --accent-wash: oklch(0.70 0.115 232 / 0.12);
-    --accent-line: oklch(0.70 0.115 232 / 0.30);
+       Indigo, for primary actions, selection and focus only. Never decoration.
+       Green is kept for "recording" and "saved", so the two never compete. */
+    --accent: oklch(0.51 0.23 277);
+    --accent-hover: oklch(0.46 0.22 277);
+    --accent-press: oklch(0.42 0.20 277);
+    --accent-ink: oklch(0.99 0.004 277);
+    --accent-wash: oklch(0.51 0.23 277 / 0.08);
+    --accent-line: oklch(0.51 0.23 277 / 0.32);
 
     /* --- Semantic state -------------------------------------------------- */
-    --success: oklch(0.78 0.15 150);
-    --success-wash: oklch(0.78 0.15 150 / 0.14);
-    --warning: oklch(0.82 0.14 75);
-    --warning-wash: oklch(0.82 0.14 75 / 0.14);
-    --danger: oklch(0.70 0.18 25);
-    --danger-wash: oklch(0.70 0.18 25 / 0.14);
+    --success: oklch(0.50 0.13 152);
+    --success-wash: oklch(0.62 0.15 152 / 0.13);
+    --warning: oklch(0.52 0.13 65);
+    --warning-wash: oklch(0.75 0.15 75 / 0.16);
+    --danger: oklch(0.53 0.20 25);
+    --danger-wash: oklch(0.63 0.20 25 / 0.12);
+
+    /* --- Overlays ---------------------------------------------------------
+       Translucent ink rather than fixed greys, so they work on any surface. */
+    --tint: oklch(0.21 0.006 277 / 0.06);
+    --row-hover: oklch(0.21 0.006 277 / 0.025);
+    --backdrop: oklch(0.21 0.01 277 / 0.32);
+    --bar: oklch(0.975 0.002 277 / 0.88);
+
+    --shadow-sm: 0 1px 2px oklch(0.21 0.01 277 / 0.06);
+    --shadow-md: 0 4px 12px oklch(0.21 0.01 277 / 0.08);
+    --shadow-lg: 0 18px 48px oklch(0.21 0.01 277 / 0.18);
 
     /* --- Type -----------------------------------------------------------
        System stack: renders natively on every OS, and avoids fetching a
@@ -70,10 +86,6 @@
     --radius-lg: 14px;
     --radius-full: 999px;
 
-    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
-    --shadow-md: 0 4px 12px oklch(0 0 0 / 0.35);
-    --shadow-lg: 0 18px 48px oklch(0 0 0 / 0.5);
-
     /* --- Depth order ------------------------------------------------------ */
     --z-sticky: 10;
     --z-backdrop: 20;
@@ -85,6 +97,47 @@
     --dur-fast: 120ms;
     --dur: 180ms;
     --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dark set: the same roles, re-valued. Surfaces lift by lightness rather than
+   by borders, and the accent brightens so it keeps its contrast on graphite. */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: oklch(0.17 0.005 277);
+        --surface: oklch(0.205 0.006 277);
+        --surface-raised: oklch(0.24 0.007 277);
+        --surface-hover: oklch(0.27 0.008 277);
+
+        --border: oklch(0.29 0.008 277);
+        --border-strong: oklch(0.40 0.010 277);
+
+        --ink: oklch(0.945 0.003 277);
+        --ink-muted: oklch(0.78 0.006 277);
+        --ink-subtle: oklch(0.665 0.010 277);
+
+        --accent: oklch(0.69 0.16 277);
+        --accent-hover: oklch(0.75 0.14 277);
+        --accent-press: oklch(0.63 0.17 277);
+        --accent-ink: oklch(0.17 0.03 277);
+        --accent-wash: oklch(0.69 0.16 277 / 0.14);
+        --accent-line: oklch(0.69 0.16 277 / 0.34);
+
+        --success: oklch(0.78 0.15 152);
+        --success-wash: oklch(0.78 0.15 152 / 0.14);
+        --warning: oklch(0.82 0.14 75);
+        --warning-wash: oklch(0.82 0.14 75 / 0.14);
+        --danger: oklch(0.71 0.18 25);
+        --danger-wash: oklch(0.71 0.18 25 / 0.15);
+
+        --tint: oklch(1 0 0 / 0.06);
+        --row-hover: oklch(1 0 0 / 0.025);
+        --backdrop: oklch(0.10 0.01 277 / 0.7);
+        --bar: oklch(0.17 0.005 277 / 0.88);
+
+        --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
+        --shadow-md: 0 4px 12px oklch(0 0 0 / 0.35);
+        --shadow-lg: 0 18px 48px oklch(0 0 0 / 0.5);
+    }
 }
 
 *,
@@ -373,7 +426,7 @@ hr {
 
 .status-success { color: var(--success); background: var(--success-wash); }
 .status-failed { color: var(--danger); background: var(--danger-wash); }
-.status-new { color: var(--ink-subtle); background: oklch(1 0 0 / 0.06); }
+.status-new { color: var(--ink-subtle); background: var(--tint); }
 
 /* =========================================================================
    Table
@@ -409,7 +462,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-    background: oklch(1 0 0 / 0.025);
+    background: var(--row-hover);
 }
 
 tbody tr:last-child td { border-bottom: none; }
@@ -445,7 +498,7 @@ dialog {
 }
 
 dialog::backdrop {
-    background: oklch(0.12 0.02 235 / 0.7);
+    background: var(--backdrop);
     backdrop-filter: blur(2px);
 }
 

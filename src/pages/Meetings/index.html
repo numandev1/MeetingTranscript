@@ -7,36 +7,99 @@
     <title>MeetingTranscript</title>
     <link rel="stylesheet" href="styles/app.css">
     <style>
-        body {
+        /* --- App shell ------------------------------------------------------
+           Two views behind one bar. Meetings is the daily surface; settings are
+           visited rarely, so they get their own view instead of trailing three
+           thousand pixels below the list. */
+        .app-bar {
+            position: sticky;
+            top: 0;
+            z-index: var(--z-sticky);
+            background: var(--bar);
+            backdrop-filter: saturate(1.2) blur(8px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .app-bar-inner {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 0 var(--space-5);
+            display: flex;
+            align-items: center;
+            gap: var(--space-5);
+            height: 3.5rem;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-weight: 600;
+            font-size: var(--text-md);
+            color: var(--ink);
+            letter-spacing: -0.011em;
+        }
+
+        .brand img { width: 24px; height: 24px; border-radius: var(--radius-sm); }
+
+        .tabs {
+            display: flex;
+            gap: var(--space-1);
+            height: 100%;
+        }
+
+        .tab {
+            display: flex;
+            align-items: center;
+            padding: 0 var(--space-3);
+            color: var(--ink-subtle);
+            font-weight: 550;
+            text-decoration: none;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+        }
+
+        .tab:hover { color: var(--ink); }
+
+        .tab[aria-current="page"] {
+            color: var(--ink);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab:focus-visible { outline-offset: -2px; }
+
+        main {
+            max-width: 1120px;
+            margin: 0 auto;
             padding: var(--space-6) var(--space-5) var(--space-7);
         }
 
-        .page {
-            max-width: 1120px;
-            margin: 0 auto;
-        }
+        .view[hidden] { display: none; }
 
-        .page-header {
+        .view-head {
             display: flex;
-            align-items: center;
-            gap: var(--space-3);
-            margin-bottom: var(--space-6);
-        }
-
-        .page-header img { width: 30px; height: 30px; border-radius: var(--radius-sm); }
-        .page-header h1 { font-size: var(--text-2xl); }
-
-        section + section { margin-top: var(--space-7); }
-
-        .section-head {
-            display: flex;
-            align-items: baseline;
+            align-items: flex-end;
             justify-content: space-between;
             gap: var(--space-4);
+            flex-wrap: wrap;
             margin-bottom: var(--space-4);
         }
 
-        .section-head p { max-width: 62ch; }
+        .view-head h1 { font-size: var(--text-xl); }
+        .view-head .sub-text { margin-top: var(--space-1); max-width: 62ch; }
+
+        .toolbar {
+            display: flex;
+            gap: var(--space-2);
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .toolbar input[type="search"] { width: 15rem; }
+
+        .notice-line { margin-bottom: var(--space-3); }
+        .notice-line:empty { display: none; }
 
         /* --- Meetings table ------------------------------------------------ */
         #meetings-table-container {
@@ -47,19 +110,27 @@
         }
 
         #meetings-table-container table { font-variant-numeric: tabular-nums; }
-        #meetings-table-container thead th { padding-top: var(--space-4); }
+        #meetings-table-container thead th { padding-top: var(--space-3); }
         #meetings-table-container th:first-child,
         #meetings-table-container td:first-child { padding-left: var(--space-5); }
         #meetings-table-container th:last-child,
-        #meetings-table-container td:last-child { padding-right: var(--space-5); }
+        #meetings-table-container td:last-child { padding-right: var(--space-4); }
+
+        .col-summary { width: 12.5rem; }
+
+        /* View and Redo belong together; never let Redo drop onto its own line */
+        #meetings-table td:nth-child(2) .stack { flex-wrap: nowrap; }
+        .col-delivery { width: 15rem; }
+        .col-actions { width: 1%; }
 
         /* Editable title: signal the affordance without a permanent input box */
         .meeting-title {
+            display: inline-block;
             color: var(--ink);
             font-weight: 550;
             border-radius: var(--radius-sm);
-            padding: 0.15rem 0.35rem;
-            margin: -0.15rem -0.35rem;
+            padding: 0.1rem 0.35rem;
+            margin: -0.1rem -0.35rem;
             cursor: text;
             transition: background-color var(--dur-fast) var(--ease);
         }
@@ -72,17 +143,26 @@
             box-shadow: 0 0 0 2px var(--accent-line);
         }
 
-        .row-actions {
-            display: flex;
-            gap: var(--space-1);
-            align-items: center;
-            justify-content: flex-end;
+        .meeting-meta {
+            margin-top: 0.2rem;
+            font-size: var(--text-sm);
+            color: var(--ink-subtle);
         }
 
-        /* Holds the summary slot open on rows that have not been summarised */
-        .summary-slot {
-            display: inline-block;
-            min-width: 4.75rem;
+        .meeting-meta .status { margin-left: var(--space-2); vertical-align: 1px; }
+
+        .stack {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .row-actions {
+            display: flex;
+            gap: 0.125rem;
+            align-items: center;
+            justify-content: flex-end;
         }
 
         /* Icon actions stay quiet until the row is approached */
@@ -95,26 +175,25 @@
             padding: var(--space-2);
             border-radius: var(--radius-sm);
             color: var(--ink-muted);
-            opacity: 0.65;
-            transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+            opacity: 0.6;
+            transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
         }
 
         tr:hover .view-button,
         tr:hover .download-button,
         tr:hover .post-button,
-        tr:hover .delete-button { opacity: 1; }
+        tr:hover .delete-button,
+        .row-actions button:focus-visible { opacity: 1; }
 
         .view-button:hover,
         .download-button:hover,
-        .post-button:hover { background: var(--surface-hover); }
+        .post-button:hover { background: var(--surface-hover); color: var(--ink); }
 
-        .delete-button:hover { background: var(--danger-wash); }
+        .delete-button:hover { background: var(--danger-wash); color: var(--danger); }
 
-        .view-button .icon,
-        .download-button .icon,
-        .post-button .icon,
-        .delete-button .icon { width: 16px; height: 16px; }
+        .row-actions .icon { width: 16px; height: 16px; }
 
+        /* One small-button vocabulary for every inline row action */
         .view-summary-button,
         .summarize-button,
         .obsidian-button {
@@ -125,11 +204,6 @@
             padding: 0.2rem 0.5rem;
         }
 
-        /* Fixed widths keep the icon actions in a stable column from row to row,
-           even though the label alternates between Summarise and Re-summarise. */
-        .summarize-button { min-width: 6.5rem; }
-        .view-summary-button { min-width: 4.75rem; }
-
         .view-summary-button:hover:not(:disabled),
         .summarize-button:hover:not(:disabled),
         .obsidian-button:hover:not(:disabled) {
@@ -137,34 +211,95 @@
             border-color: var(--accent);
         }
 
-        .fade-mask {
-            mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+        /* Re-running is the secondary move once a summary exists */
+        .summarize-button.is-redo {
+            border-color: transparent;
+            color: var(--ink-subtle);
         }
 
-        #show-all { margin: var(--space-3) auto 0; display: none; }
+        .summarize-button.is-redo:hover:not(:disabled) {
+            color: var(--accent);
+            background: var(--accent-wash);
+            border-color: transparent;
+        }
 
         /* --- Settings ------------------------------------------------------ */
-        .grid-container {
+        .settings-layout {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-            gap: var(--space-4);
+            grid-template-columns: 11rem minmax(0, 46rem);
+            gap: var(--space-6);
             align-items: start;
         }
 
-        .card { padding: var(--space-5); }
-
-        .webhook-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-2);
-            margin-bottom: var(--space-4);
+        .settings-nav {
+            position: sticky;
+            top: calc(3.5rem + var(--space-5));
+            display: grid;
+            gap: 0.125rem;
         }
 
-        .webhook-header .card-heading { margin-bottom: 0; }
-        .webhook-header img { opacity: 0.8; }
+        .settings-nav a {
+            display: block;
+            padding: 0.35rem var(--space-3);
+            border-radius: var(--radius-sm);
+            color: var(--ink-subtle);
+            text-decoration: none;
+            font-weight: 500;
+            transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+        }
+
+        .settings-nav a:hover { color: var(--ink); background: var(--surface-hover); }
+        .settings-nav a[aria-current="true"] { color: var(--ink); background: var(--surface-raised); }
+
+        .settings-group { scroll-margin-top: calc(3.5rem + var(--space-5)); }
+        .settings-group + .settings-group { margin-top: var(--space-6); }
+
+        .settings-group > h2 { font-size: var(--text-md); }
+
+        .group-intro {
+            margin-top: var(--space-1);
+            max-width: 62ch;
+        }
+
+        .group-panel {
+            margin-top: var(--space-3);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+        }
+
+        .setting { padding: var(--space-4) var(--space-5); }
+        .setting + .setting { border-top: 1px solid var(--border); }
+
+        .setting > label:not(.visually-hidden) { color: var(--ink); }
+
+        .help {
+            margin-top: var(--space-2);
+            max-width: 64ch;
+        }
+
+        .help + .help { margin-top: var(--space-2); }
+
+        .actions-row {
+            display: flex;
+            gap: var(--space-2);
+            flex-wrap: wrap;
+            margin-top: var(--space-3);
+        }
+
+        .setting .checkbox-group label,
+        .setting .radio-item label { font-weight: 500; }
+
+        #summary-prompt {
+            font-family: var(--font-mono);
+            font-size: var(--text-sm);
+            line-height: 1.6;
+            resize: vertical;
+        }
 
         .integration-card {
             display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
             gap: var(--space-2);
         }
 
@@ -246,16 +381,41 @@
             flex: 1;
         }
 
-        #transcript-dialog-body h3 {
-            font-size: var(--text-xs);
+        #transcript-dialog-body > h3 {
+            font-size: var(--text-sm);
             font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
             color: var(--ink-subtle);
             margin-bottom: var(--space-3);
         }
 
-        #transcript-dialog-body h3:not(:first-child) { margin-top: var(--space-6); }
+        #transcript-dialog-body > h3:not(:first-child) {
+            margin-top: var(--space-6);
+            padding-top: var(--space-5);
+            border-top: 1px solid var(--border);
+        }
+
+        /* Rendered summary: the markdown's own structure, not its raw syntax */
+        .summary-doc {
+            max-width: 68ch;
+            color: var(--ink-muted);
+            line-height: 1.65;
+        }
+
+        .summary-doc h4 {
+            font-size: var(--text-md);
+            color: var(--ink);
+            margin: var(--space-4) 0 var(--space-1);
+        }
+
+        .summary-doc h4:first-child { margin-top: 0; }
+        .summary-doc p + p { margin-top: var(--space-2); }
+        .summary-doc ul { margin: var(--space-1) 0 0; padding-left: 1.2rem; }
+        .summary-doc li + li { margin-top: 0.2rem; }
+        .summary-doc li::marker { color: var(--ink-subtle); }
+        .summary-doc strong { color: var(--ink); font-weight: 600; }
+        .summary-doc input[type="checkbox"] { vertical-align: -2px; margin-right: var(--space-2); }
+
+        .dialog-warning { margin-bottom: var(--space-4); white-space: normal; }
 
         .dialog-block { margin-bottom: var(--space-4); }
 
@@ -288,13 +448,15 @@
             border-top: 1px solid var(--border);
         }
 
-        #transcript-dialog-close {
+        #transcript-dialog-close,
+        #later-button {
             background: transparent;
             color: var(--ink-muted);
             border-color: var(--border-strong);
         }
 
-        #transcript-dialog-close:hover { background: var(--surface-hover); color: var(--ink); }
+        #transcript-dialog-close:hover,
+        #later-button:hover { background: var(--surface-hover); color: var(--ink); }
 
         #transcript-dialog-copy,
         #transcript-dialog-obsidian {
@@ -309,72 +471,90 @@
             border-color: var(--accent);
         }
 
-        #later-button {
-            background: transparent;
-            color: var(--ink-muted);
-            border-color: var(--border-strong);
+        #permission-dialog { max-width: 28rem; }
+
+        @media (max-width: 900px) {
+            .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+            .settings-nav {
+                position: static;
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--space-1);
+            }
+            .col-delivery { width: auto; }
         }
 
         @media (max-width: 720px) {
-            body { padding: var(--space-5) var(--space-4) var(--space-6); }
+            .app-bar-inner, main { padding-left: var(--space-4); padding-right: var(--space-4); }
+            .brand span { display: none; }
             #meetings-table-container { overflow-x: auto; }
+            #meetings-table-container table { min-width: 680px; }
+            .toolbar input[type="search"] { width: 100%; }
+            .toolbar { width: 100%; }
         }
     </style>
 </head>
 
 <body>
-
-
     <a href="#meetings-table-container" class="skip-link">Skip to meetings</a>
-    <div class="page">
-        <dialog id="permission-dialog" closedby="any">
-            <h3 style="margin-bottom: var(--space-2);">A few permissions are missing</h3>
-            <p class="sub-text" style="margin-bottom: var(--space-4); max-width: 46ch;">MeetingTranscript needs them to
-                keep recording the platforms you turned on.</p>
-            <div style="display: flex; justify-content: flex-end; gap: var(--space-2);">
-                <button id="later-button">Later</button>
-                <button id="review-button">Review</button>
-            </div>
-        </dialog>
 
-        <dialog id="transcript-dialog" closedby="any">
-            <div id="transcript-dialog-header">
-                <p id="transcript-dialog-title"></p>
-                <p id="transcript-dialog-meta" class="sub-text"></p>
-            </div>
-            <div id="transcript-dialog-body"></div>
-            <div id="transcript-dialog-footer">
-                <button id="transcript-dialog-close">Close</button>
-                <button id="transcript-dialog-copy">Copy</button>
-                <button id="transcript-dialog-obsidian">Save to Obsidian</button>
-                <button id="transcript-dialog-download">Download</button>
-            </div>
-        </dialog>
+    <dialog id="permission-dialog" closedby="any">
+        <h3 style="margin-bottom: var(--space-2);">A few permissions are missing</h3>
+        <p class="sub-text" style="margin-bottom: var(--space-4);">MeetingTranscript needs them to keep recording the
+            platforms you turned on.</p>
+        <div style="display: flex; justify-content: flex-end; gap: var(--space-2);">
+            <button id="later-button">Later</button>
+            <button id="review-button">Review</button>
+        </div>
+    </dialog>
 
-        <header class="page-header">
-            <img src="./icon.png" alt="">
-            <h1>MeetingTranscript</h1>
-        </header>
+    <dialog id="transcript-dialog" closedby="any">
+        <div id="transcript-dialog-header">
+            <p id="transcript-dialog-title"></p>
+            <p id="transcript-dialog-meta" class="sub-text"></p>
+        </div>
+        <div id="transcript-dialog-body"></div>
+        <div id="transcript-dialog-footer">
+            <button id="transcript-dialog-close">Close</button>
+            <button id="transcript-dialog-copy">Copy</button>
+            <button id="transcript-dialog-obsidian">Save to Obsidian</button>
+            <button id="transcript-dialog-download">Download</button>
+        </div>
+    </dialog>
 
-        <section id="last-10-meetings">
-            <div class="section-head">
+    <header class="app-bar">
+        <div class="app-bar-inner">
+            <div class="brand">
+                <img src="./icon.png" alt="">
+                <span>MeetingTranscript</span>
+            </div>
+            <nav class="tabs" aria-label="Sections">
+                <a class="tab" href="#meetings" data-view="meetings" aria-current="page">Meetings</a>
+                <a class="tab" href="#settings" data-view="settings">Settings</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <!-- ================= Meetings ================= -->
+        <section id="view-meetings" class="view" aria-labelledby="meetings-heading">
+            <div class="view-head">
                 <div>
-                    <h2>Recent meetings</h2>
-                    <p class="sub-text">The last 10 meetings stay on this device. Older ones are removed automatically.
-                    </p>
+                    <h1 id="meetings-heading">Meetings</h1>
+                    <p class="sub-text" id="meetings-retention-note">Kept on this device only.</p>
                 </div>
-                <div style="display: flex; gap: var(--space-2); flex-shrink: 0; align-items: center;">
+                <div class="toolbar">
                     <label for="meetings-filter" class="visually-hidden">Filter meetings</label>
-                    <input type="search" id="meetings-filter" placeholder="Filter by title or date"
-                        style="width: 15rem;">
-                    <button id="import-transcript" class="btn-secondary">Import transcript file</button>
+                    <input type="search" id="meetings-filter" placeholder="Filter by title, platform or date">
+                    <button id="import-transcript" class="btn-secondary">Import file</button>
                     <input type="file" id="import-transcript-file" accept="text/plain,.txt" multiple hidden>
-                    <button id="recover-last-meeting" class="btn-secondary">Recover last meeting</button>
+                    <button id="recover-last-meeting" class="btn-secondary"
+                        title="Files a meeting that ended without being saved">Recover last meeting</button>
                 </div>
             </div>
-            <p id="import-transcript-result" class="sub-text" style="margin-bottom: var(--space-3);"></p>
-            <p id="meetings-filter-empty" class="sub-text" style="margin-bottom: var(--space-3);" hidden>No meetings
-                match that filter.</p>
+
+            <p id="import-transcript-result" class="sub-text notice-line"></p>
+            <p id="meetings-filter-empty" class="sub-text notice-line" hidden>No meetings match that filter.</p>
 
             <details id="recent-errors" style="margin-bottom: var(--space-4);" hidden>
                 <summary><span id="recent-errors-count"></span></summary>
@@ -384,16 +564,15 @@
                 <p class="sub-text" style="margin-top: var(--space-2);">Kept on this device only. Include these when
                     reporting a problem.</p>
             </details>
+
             <div id="meetings-table-container">
                 <table>
                     <thead>
                         <tr>
                             <th>Meeting</th>
-                            <th>Platform</th>
-                            <th>When</th>
-                            <th>Webhook</th>
-                            <th>Obsidian</th>
-                            <th><span class="sub-text" style="font-size:inherit">Actions</span></th>
+                            <th class="col-summary">Summary</th>
+                            <th class="col-delivery">Delivered to</th>
+                            <th class="col-actions"><span class="visually-hidden">Actions</span></th>
                         </tr>
                     </thead>
                     <tbody id="meetings-table">
@@ -401,216 +580,210 @@
                     </tbody>
                 </table>
             </div>
-            <button id="show-all" class="btn-secondary">Show all</button>
         </section>
 
-        <section id="webhooks">
-            <h2>Settings &amp; integrations</h2>
-
-            <p class="sub-text" style="margin-bottom: var(--space-4); max-width: 62ch;">Send every transcript to your own
-                tools. Anything that accepts a webhook works directly; for anything else, an automation tool like n8n
-                bridges the gap.</p>
-
-            <div class="grid-container">
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Summary prompt</p>
-                    </div>
-
-                    <p class="sub-text" style="margin-bottom: var(--space-4);">
-                        Sent to ChatGPT with the transcript appended. Change it to alter the sections, the tone, or the
-                        language of the summary &mdash; asking for the summary in the meeting's own language works.
-                    </p>
-
-                    <form id="summary-prompt-form" class="form-field">
-                        <label for="summary-prompt">Instructions</label>
-                        <textarea id="summary-prompt" rows="8"
-                            style="width:100%; font-family: var(--font-mono); font-size: var(--text-sm); resize: vertical;"></textarea>
-                        <div style="display:flex; gap: var(--space-2); margin-top: var(--space-3);">
-                            <button id="save-summary-prompt">Save</button>
-                            <button id="reset-summary-prompt" type="button" class="btn-secondary">Reset to default</button>
-                        </div>
-                    </form>
-
-                    <hr />
-
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="auto-summarize" aria-describedby="auto-summarize-help">
-                        <label for="auto-summarize">
-                            Summarise automatically when a meeting ends
-                        </label>
-                    </div>
-                    <p id="auto-summarize-help" class="sub-text" style="margin-top: 0.75rem;">
-                        Opens a ChatGPT tab on its own, sends the transcript, saves the summary, and closes the tab
-                        again. The tab is in front for a few seconds while the message is typed &mdash; ChatGPT ignores
-                        a hidden tab &mdash; then you get your place back. This sends every meeting's full transcript
-                        to ChatGPT, where OpenAI's terms and data handling apply.
-                    </p>
+        <!-- ================= Settings ================= -->
+        <section id="view-settings" class="view" aria-labelledby="settings-heading" hidden>
+            <div class="view-head">
+                <div>
+                    <h1 id="settings-heading">Settings</h1>
+                    <p class="sub-text">Every change applies to the next meeting. Nothing here leaves this device
+                        unless you point it somewhere.</p>
                 </div>
+            </div>
 
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Meeting history</p>
-                    </div>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <a href="#settings-you">You</a>
+                    <a href="#settings-summaries">Summaries</a>
+                    <a href="#settings-obsidian">Obsidian</a>
+                    <a href="#settings-webhook">Webhook</a>
+                    <a href="#settings-storage">Files &amp; history</a>
+                    <a href="#settings-transfer">Move to another computer</a>
+                </nav>
 
-                    <form id="meetings-to-keep-form" class="form-field">
-                        <label for="meetings-to-keep">Meetings to keep on this device</label>
-                        <div class="input-group">
-                            <input type="number" id="meetings-to-keep" min="0" max="500" step="1">
-                            <button id="save-meetings-to-keep">Save</button>
+                <div>
+                    <!-- You -->
+                    <section id="settings-you" class="settings-group">
+                        <h2>You</h2>
+                        <div class="group-panel">
+                            <form id="participant-name-form" class="setting">
+                                <label for="participant-name">Your name in transcripts</label>
+                                <div class="input-group">
+                                    <input type="text" id="participant-name" placeholder="e.g. Numan">
+                                    <button id="save-participant-name">Save</button>
+                                </div>
+                                <p class="sub-text help">
+                                    Captions label your own speech as <b>You</b>. Set your name and it is written into
+                                    transcripts, webhooks and Obsidian notes instead. Google Meet can detect it on its
+                                    own; Teams and Zoom cannot, so without it those transcripts keep saying
+                                    <b>You</b>.
+                                </p>
+                            </form>
                         </div>
-                        <p class="sub-text" style="margin-top: var(--space-3);">
-                            When a new meeting is saved, older ones beyond this number drop off the list below. Set it
-                            to <b>0</b> to keep every meeting.
+                    </section>
+
+                    <!-- Summaries -->
+                    <section id="settings-summaries" class="settings-group">
+                        <h2>Summaries</h2>
+                        <p class="sub-text group-intro">Summaries are written by ChatGPT in your own signed-in
+                            account. There is no API key.</p>
+                        <div class="group-panel">
+                            <div class="setting">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="auto-summarize" aria-describedby="auto-summarize-help">
+                                    <label for="auto-summarize">Summarise automatically when a meeting ends</label>
+                                </div>
+                                <p id="auto-summarize-help" class="sub-text help" style="padding-left: 1.75rem;">
+                                    Opens a ChatGPT tab on its own, sends the transcript, saves the summary, and closes
+                                    the tab again. The tab is in front for a few seconds while the message is typed
+                                    &mdash; ChatGPT ignores a hidden tab &mdash; then you get your place back. This
+                                    sends every meeting's full transcript to ChatGPT, where OpenAI's terms and data
+                                    handling apply.
+                                </p>
+                            </div>
+
+                            <form id="summary-prompt-form" class="setting">
+                                <label for="summary-prompt">Summary prompt</label>
+                                <textarea id="summary-prompt" rows="9"></textarea>
+                                <p class="sub-text help">
+                                    Sent with the transcript appended. Change it to alter the sections, the tone, or the
+                                    language &mdash; asking for the summary in the meeting's own language works.
+                                </p>
+                                <div class="actions-row">
+                                    <button id="save-summary-prompt">Save prompt</button>
+                                    <button id="reset-summary-prompt" type="button" class="btn-secondary">Reset to
+                                        default</button>
+                                </div>
+                            </form>
+                        </div>
+                    </section>
+
+                    <!-- Obsidian -->
+                    <section id="settings-obsidian" class="settings-group">
+                        <h2>Obsidian</h2>
+                        <p class="sub-text group-intro">
+                            Saves every meeting as a note in your vault, alongside the text file. Requires the
+                            <a href="https://github.com/coddingtonbear/obsidian-local-rest-api" target="_blank">Local
+                                REST API</a> community plugin, with its <b>non-encrypted (HTTP) server</b> enabled
+                            &mdash; the HTTPS port uses a self-signed certificate that browser extensions cannot
+                            accept.
                         </p>
-                        <p class="sub-text" style="margin-top: var(--space-2);">
-                            <b>This only clears the extension's own copy.</b> Notes already written to Obsidian, text
-                            files already downloaded and anything already sent to your webhook stay exactly where they
-                            are &mdash; nothing this extension does removes them. Delete those in Obsidian or Finder if
-                            you want them gone.
-                        </p>
-                    </form>
-                </div>
+                        <div class="group-panel">
+                            <form class="setting">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="obsidian-enabled">
+                                    <label for="obsidian-enabled">Save a note to Obsidian after each meeting</label>
+                                </div>
+                            </form>
 
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Move settings to another computer</p>
-                    </div>
+                            <form id="obsidian-api-key-form" class="setting">
+                                <label for="obsidian-api-key">API key</label>
+                                <div class="input-group">
+                                    <input type="password" id="obsidian-api-key" placeholder="From the plugin settings"
+                                        autocomplete="off">
+                                    <button id="save-obsidian-api-key">Save</button>
+                                </div>
+                                <p class="sub-text help">
+                                    Copy it from Obsidian &rarr; Settings &rarr; Local REST API. Stored on this device
+                                    only and never synced &mdash; but like any browser data it is readable by anything
+                                    with access to this Chrome profile.
+                                </p>
+                            </form>
 
-                    <p class="sub-text" style="margin-bottom: var(--space-4);">
-                        Export your setup here, then import it on the other machine. Meetings are not included &mdash;
-                        transcripts stay on the device that recorded them.
-                    </p>
+                            <form id="obsidian-folder-form" class="setting">
+                                <label for="obsidian-folder">Notes folder</label>
+                                <div class="input-group">
+                                    <input type="text" id="obsidian-folder" placeholder="Meetings">
+                                    <button id="save-obsidian-folder">Save</button>
+                                </div>
+                                <p class="sub-text help">
+                                    A folder inside your vault, created automatically. Leave it empty to save notes at
+                                    the vault root. Notes are named <b>2026-09-14 0930 Meeting title</b>, so they sort
+                                    by date.
+                                </p>
+                            </form>
 
-                    <div class="checkbox-group" style="margin-bottom: var(--space-4);">
-                        <input type="checkbox" id="export-include-key" checked>
-                        <label for="export-include-key">
-                            Include the Obsidian API key
-                            <span class="sub-text">Needed for Obsidian to work on the other computer. The file will
-                                contain a credential, so treat it like a password.</span>
-                        </label>
-                    </div>
+                            <form id="obsidian-summary-folder-form" class="setting">
+                                <label for="obsidian-summary-folder">Summaries folder</label>
+                                <div class="input-group">
+                                    <input type="text" id="obsidian-summary-folder" placeholder="MeetingSummary">
+                                    <button id="save-obsidian-summary-folder">Save</button>
+                                </div>
+                                <p class="sub-text help">
+                                    Kept apart from the transcripts. Each summary links back to its full transcript
+                                    note.
+                                </p>
+                            </form>
 
-                    <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
-                        <button id="export-settings" class="btn-secondary">Export settings</button>
-                        <button id="import-settings">Import settings</button>
-                        <input type="file" id="import-settings-file" accept="application/json,.json" hidden>
-                    </div>
+                            <form id="obsidian-base-url-form" class="setting">
+                                <label for="obsidian-base-url">Local REST API address</label>
+                                <div class="input-group">
+                                    <input type="url" id="obsidian-base-url" placeholder="http://127.0.0.1:27123">
+                                    <button id="save-obsidian-base-url">Save</button>
+                                </div>
+                                <p class="sub-text help">Only change this if you moved the plugin off its default port.
+                                </p>
+                            </form>
 
-                    <p id="transfer-result" class="sub-text" style="margin-top: var(--space-3);"></p>
-                </div>
-
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Your name</p>
-                    </div>
-
-                    <form id="participant-name-form" class="form-field">
-                        <label for="participant-name">Name to use for yourself</label>
-                        <div class="input-group">
-                            <input type="text" id="participant-name" placeholder="e.g. Numan">
-                            <button id="save-participant-name">Save</button>
+                            <div class="setting">
+                                <div class="actions-row" style="margin-top: 0;">
+                                    <button id="test-obsidian" type="button" class="btn-secondary">Test
+                                        connection</button>
+                                    <button id="sync-all-obsidian" type="button">Send all meetings to vault</button>
+                                </div>
+                                <p id="obsidian-test-result" class="sub-text help"></p>
+                                <p class="sub-text help">
+                                    Writes every stored meeting, and any summaries, into your vault. Notes already there
+                                    are left alone, so anything you edited in Obsidian &mdash; ticked action items,
+                                    added context &mdash; is safe. To replace one deliberately, use the vault button on
+                                    that meeting.
+                                </p>
+                            </div>
                         </div>
-                        <p class="sub-text" style="margin-top: 0.75rem;">
-                            Captions label your own speech as <b>You</b>. Set your name here and it is written into
-                            transcripts, webhooks and Obsidian notes instead. Google Meet can detect this on its own,
-                            but Teams and Zoom cannot &mdash; so leaving it empty means those transcripts keep saying
-                            <b>You</b>.
-                        </p>
-                    </form>
-                </div>
+                    </section>
 
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Configure webhook</p>
-                        <span class="icon icon-webhook"></span>
-                    </div>
-                    <form id="webhook-url-form" class="form-field">
-                        <label for="webhook-url">Webhook URL</label>
-                        <div class="input-group">
-                            <input type="url" id="webhook-url" placeholder="https://your-webhook-url.com">
-                            <button id="save-webhook">Save</button>
-                        </div>
-                    </form>
+                    <!-- Webhook -->
+                    <section id="settings-webhook" class="settings-group">
+                        <h2>Webhook</h2>
+                        <p class="sub-text group-intro">Send every transcript to your own tools. Anything that accepts
+                            a webhook works directly; for anything else, an automation tool like n8n bridges the
+                            gap.</p>
+                        <div class="group-panel">
+                            <form id="webhook-url-form" class="setting">
+                                <label for="webhook-url">Webhook URL</label>
+                                <div class="input-group">
+                                    <input type="url" id="webhook-url" placeholder="https://your-webhook-url.com">
+                                    <button id="save-webhook">Save</button>
+                                </div>
+                            </form>
 
-                    <hr />
+                            <form class="setting">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="auto-post-webhook" checked>
+                                    <label for="auto-post-webhook">Post the transcript to the webhook after each
+                                        meeting</label>
+                                </div>
+                            </form>
 
-                    <form class="form-field">
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="auto-post-webhook" checked>
-                            <label for="auto-post-webhook">
-                                Automatically post transcript to webhook URL, after each meeting
-                            </label>
-                        </div>
-                        <div class="checkbox-group" style="margin-top: 1.5rem; display: none;">
-                            <input type="checkbox" id="auto-download-file" checked>
-                            <label for="auto-download-file">
-                                Automatically download transcript text file, after each meeting
-                            </label>
-                        </div>
-                    </form>
-
-                    <hr />
-
-                    <form id="download-folder-form" class="form-field">
-                        <label for="download-folder">Save transcript files to</label>
-                        <div class="input-group">
-                            <input type="text" id="download-folder" placeholder="MeetingTranscript"
-                                aria-describedby="download-folder-help">
-                            <button id="save-download-folder">Save</button>
-                        </div>
-                        <p id="download-folder-help" class="sub-text" style="margin-top: 0.75rem;">
-                            A folder inside your browser's Downloads folder. Leave it empty to save straight into
-                            Downloads. Browser extensions are not allowed to save files anywhere outside Downloads.
-                        </p>
-                    </form>
-
-                    <hr />
-
-                    <form class="form-field">
-                        <div class="radio-item">
-                            <input type="radio" name="webhook-body-type" id="simple-webhook-body" checked />
-                            <label for="simple-webhook-body"><b>Simple webhook body</b>
-                                <br /><span class="sub-text">Pre-formatted data, suitable for no-code
-                                    integrations</span>
-                            </label>
-                        </div>
-                        <div class="radio-item">
-                            <input type="radio" name="webhook-body-type" id="advanced-webhook-body" />
-                            <label for="advanced-webhook-body"><b>Advanced webhook body</b> <br />
-                                <span class="sub-text">Raw data, suitable for code integrations</span>
-                            </label>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card">
-                    <div class="webhook-header">
-                        <p class="card-heading">Webhook help</p>
-                    </div>
-                    <p class="card-heading">Webhook integration guides</p>
-                    <div class="integration-card">
-                        <a class="integration-guide"
-                            href="https://github.com/numandev/transcriptonic/wiki/Google-Docs-integration-guide?utm_source=extension"
-                            target="_blank">
-                            <span class="icon icon-guide"></span>
-                            <p>Get transcripts on Google Docs</p>
-                        </a>
-                        <a class="integration-guide"
-                            href="https://github.com/numandev/transcriptonic/wiki/n8n-integration-guide?utm_source=extension"
-                            target="_blank">
-                            <span class="icon icon-guide"></span>
-                            <p>Using webhooks with n8n</p>
-                        </a>
-                    </div>
-                    <hr />
-                    <p class="card-heading">Webhook JSON body</p>
-                    <details>
-                        <summary>Webhook body (simple)</summary>
-                        <div class="code-block accordion-content">
-                            <code>
-                        <pre>
-{
+                            <form class="setting">
+                                <p class="sub-text" style="color: var(--ink); font-weight: 550; margin-bottom: var(--space-3);">
+                                    Request body</p>
+                                <div class="radio-item">
+                                    <input type="radio" name="webhook-body-type" id="simple-webhook-body" checked />
+                                    <label for="simple-webhook-body">Simple
+                                        <span class="sub-text">Pre-formatted text, suited to no-code tools</span>
+                                    </label>
+                                </div>
+                                <div class="radio-item">
+                                    <input type="radio" name="webhook-body-type" id="advanced-webhook-body" />
+                                    <label for="advanced-webhook-body">Advanced
+                                        <span class="sub-text">Raw structured data, suited to code</span>
+                                    </label>
+                                </div>
+                                <details style="margin-top: var(--space-3);">
+                                    <summary>Example: simple body</summary>
+                                    <div class="code-block"><pre><code>{
     "webhookBodyType": "simple",
     "meetingSoftware": "Google Meet",
     "meetingTitle": "Team meeting",
@@ -618,18 +791,11 @@
     "meetingEndTimestamp": "01/15/2024, 11:00 AM",
     "transcript": "Priya (01/15/2024, 10:00 AM)\nHi everyone!\n\nCarlos (01/15/2024, 10:01 AM)\nHello Priya!...\n\n",
     "chatMessages": "Mohammed (01/15/2024, 10:05 AM)\nCan you share the slides?\n\nSofia (01/15/2024, 10:06 AM)\nHere's the link: ...\n\n"
-}
-</pre>
-                        </code>
-                        </div>
-                    </details>
-
-                    <details>
-                        <summary>Webhook body (advanced)</summary>
-                        <div class="code-block accordion-content">
-                            <code>
-                            <pre>
-{
+}</code></pre></div>
+                                </details>
+                                <details>
+                                    <summary>Example: advanced body</summary>
+                                    <div class="code-block"><pre><code>{
     "webhookBodyType": "advanced",
     "meetingSoftware": "Google Meet",
     "meetingTitle": "Team meeting",
@@ -659,112 +825,101 @@
             "chatMessageText": "Here's the link: ..."
         }
     ]
-}
-</pre>
-                    </code>
+}</code></pre></div>
+                                </details>
+                            </form>
+
+                            <div class="setting">
+                                <p class="sub-text" style="color: var(--ink); font-weight: 550; margin-bottom: var(--space-3);">
+                                    Integration guides</p>
+                                <div class="integration-card">
+                                    <a class="integration-guide"
+                                        href="https://github.com/numandev/MeetingTranscript/wiki/Google-Docs-integration-guide?utm_source=extension"
+                                        target="_blank">
+                                        <span class="icon icon-guide"></span>
+                                        <p>Get transcripts on Google Docs</p>
+                                    </a>
+                                    <a class="integration-guide"
+                                        href="https://github.com/numandev/MeetingTranscript/wiki/n8n-integration-guide?utm_source=extension"
+                                        target="_blank">
+                                        <span class="icon icon-guide"></span>
+                                        <p>Using webhooks with n8n</p>
+                                    </a>
+                                </div>
+                            </div>
                         </div>
-                    </details>
-                </div>
+                    </section>
 
-                <div class="card">
-                    <div class="webhook-header">
-                        <span class="icon icon-vault"></span>
-                        <p class="card-heading">Save to Obsidian</p>
-                    </div>
+                    <!-- Files & history -->
+                    <section id="settings-storage" class="settings-group">
+                        <h2>Files &amp; history</h2>
+                        <div class="group-panel">
+                            <form id="download-folder-form" class="setting">
+                                <label for="download-folder">Save transcript files to</label>
+                                <div class="input-group">
+                                    <input type="text" id="download-folder" placeholder="MeetingTranscript"
+                                        aria-describedby="download-folder-help">
+                                    <button id="save-download-folder">Save</button>
+                                </div>
+                                <p id="download-folder-help" class="sub-text help">
+                                    A folder inside your browser's Downloads folder. Leave it empty to save straight
+                                    into Downloads. Browser extensions are not allowed to save files anywhere outside
+                                    Downloads.
+                                </p>
+                                <div class="checkbox-group" style="margin-top: var(--space-3); display: none;">
+                                    <input type="checkbox" id="auto-download-file" checked>
+                                    <label for="auto-download-file">Download the transcript text file after each
+                                        meeting</label>
+                                </div>
+                            </form>
 
-                    <p class="sub-text" style="margin-top: 0;">
-                        Saves every meeting as a note in your vault, alongside the text file. Requires the
-                        <a href="https://github.com/coddingtonbear/obsidian-local-rest-api" target="_blank">Local REST
-                            API</a> community plugin, with its <b>non-encrypted (HTTP) server</b> enabled &mdash; the
-                        HTTPS port uses a self-signed certificate that browser extensions cannot accept.
-                    </p>
-
-                    <form class="form-field">
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="obsidian-enabled">
-                            <label for="obsidian-enabled">
-                                Save a note to Obsidian, after each meeting
-                            </label>
+                            <form id="meetings-to-keep-form" class="setting">
+                                <label for="meetings-to-keep">Meetings to keep on this device</label>
+                                <div class="input-group" style="max-width: 16rem;">
+                                    <input type="number" id="meetings-to-keep" min="0" max="500" step="1">
+                                    <button id="save-meetings-to-keep">Save</button>
+                                </div>
+                                <p class="sub-text help">
+                                    When a new meeting is saved, older ones beyond this number drop off the list. Set it
+                                    to <b>0</b> to keep every meeting.
+                                </p>
+                                <p class="sub-text help">
+                                    <b>This only clears the extension's own copy.</b> Notes already in Obsidian, text
+                                    files already downloaded and anything already sent to your webhook stay exactly
+                                    where they are &mdash; nothing this extension does removes them.
+                                </p>
+                            </form>
                         </div>
-                    </form>
+                    </section>
 
-                    <hr />
-
-                    <form id="obsidian-api-key-form" class="form-field">
-                        <label for="obsidian-api-key"><span class="icon icon-key"
-                                style="vertical-align:-2px;margin-right:var(--space-1)"></span>API key</label>
-                        <div class="input-group">
-                            <input type="password" id="obsidian-api-key" placeholder="From the plugin settings"
-                                autocomplete="off">
-                            <button id="save-obsidian-api-key">Save</button>
+                    <!-- Transfer -->
+                    <section id="settings-transfer" class="settings-group">
+                        <h2>Move to another computer</h2>
+                        <p class="sub-text group-intro">Export your setup here, then import it on the other machine.
+                            Meetings are not included &mdash; transcripts stay on the device that recorded them.</p>
+                        <div class="group-panel">
+                            <div class="setting">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="export-include-key" checked>
+                                    <label for="export-include-key">
+                                        Include the Obsidian API key
+                                        <span class="sub-text">Needed for Obsidian to work on the other computer. The
+                                            file will contain a credential, so treat it like a password.</span>
+                                    </label>
+                                </div>
+                                <div class="actions-row">
+                                    <button id="export-settings" class="btn-secondary">Export settings</button>
+                                    <button id="import-settings">Import settings</button>
+                                    <input type="file" id="import-settings-file" accept="application/json,.json" hidden>
+                                </div>
+                                <p id="transfer-result" class="sub-text help"></p>
+                            </div>
                         </div>
-                        <p class="sub-text" style="margin-top: 0.75rem;">
-                            Copy it from Obsidian &rarr; Settings &rarr; Local REST API. Stored on this device only and
-                            never synced &mdash; but like any browser data it is readable by anything with access to
-                            this Chrome profile.
-                        </p>
-                    </form>
-
-                    <hr />
-
-                    <form id="obsidian-folder-form" class="form-field">
-                        <label for="obsidian-folder">Save notes to folder</label>
-                        <div class="input-group">
-                            <input type="text" id="obsidian-folder" placeholder="Meetings">
-                            <button id="save-obsidian-folder">Save</button>
-                        </div>
-                        <p class="sub-text" style="margin-top: 0.75rem;">
-                            Folder inside your vault, created automatically. Leave it empty to save notes at the vault
-                            root. Each note is named <b>Meeting title 2026-09-14</b>.
-                        </p>
-                    </form>
-
-                    <hr />
-
-                    <form id="obsidian-summary-folder-form" class="form-field">
-                        <label for="obsidian-summary-folder">Save summaries to folder</label>
-                        <div class="input-group">
-                            <input type="text" id="obsidian-summary-folder" placeholder="MeetingSummary">
-                            <button id="save-obsidian-summary-folder">Save</button>
-                        </div>
-                        <p class="sub-text" style="margin-top: 0.75rem;">
-                            Where ChatGPT summaries are filed. Kept apart from the transcripts, and each summary links
-                            back to its full transcript note.
-                        </p>
-                    </form>
-
-                    <hr />
-
-                    <form id="obsidian-base-url-form" class="form-field">
-                        <label for="obsidian-base-url">Local REST API address</label>
-                        <div class="input-group">
-                            <input type="url" id="obsidian-base-url" placeholder="http://127.0.0.1:27123">
-                            <button id="save-obsidian-base-url">Save</button>
-                        </div>
-                        <p class="sub-text" style="margin-top: 0.75rem;">
-                            Only change this if you moved the plugin off its default port.
-                        </p>
-                    </form>
-
-                    <hr />
-
-                    <div class="form-field">
-                        <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
-                            <button id="test-obsidian" type="button" class="btn-secondary">Test connection</button>
-                            <button id="sync-all-obsidian" type="button">Send all meetings to vault</button>
-                        </div>
-                        <p id="obsidian-test-result" class="sub-text" style="margin-top: var(--space-3);"></p>
-                        <p class="sub-text" style="margin-top: var(--space-2);">
-                            Writes every stored meeting, and any summaries, into your vault. Notes already there are
-                            left alone, so anything you edited in Obsidian &mdash; ticked action items, added context
-                            &mdash; is safe. To replace one deliberately, use the Obsidian button on that meeting.
-                        </p>
-                    </div>
+                    </section>
                 </div>
             </div>
         </section>
-    </div>
-
+    </main>
 </body>
 
 </html>
