@@ -94,15 +94,15 @@ export function parseSettingsFile(raw: string): ParsedSettingsFile {
     }
 
     if (!parsed || typeof parsed !== "object") {
-        throw new Error("That file does not contain MeetingTranscript settings.")
+        throw new Error("That file does not contain MeetingTranscriptToObsidian settings.")
     }
 
     const file = parsed as Partial<SettingsFile>
     if (file.kind !== SETTINGS_FILE_KIND) {
-        throw new Error("That file was not exported from MeetingTranscript.")
+        throw new Error("That file was not exported from MeetingTranscriptToObsidian.")
     }
     if (typeof file.version !== "number" || file.version > SETTINGS_FILE_VERSION) {
-        throw new Error("That file was exported from a newer version. Update MeetingTranscript first.")
+        throw new Error("That file was exported from a newer version. Update MeetingTranscriptToObsidian first.")
     }
     if (!file.settings || typeof file.settings !== "object") {
         throw new Error("That settings file is empty.")

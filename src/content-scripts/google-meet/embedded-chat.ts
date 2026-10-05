@@ -70,7 +70,7 @@ export function initGoogleMeetEmbeddedChat(): void {
                     fresh.forEach(m => sentIds.add(m.messageId))
                 }
             })
-            .catch(err => console.error("MeetingTranscript: could not relay chat messages", err))
+            .catch(err => console.error("MeetingTranscriptToObsidian: could not relay chat messages", err))
     }
 
     function scheduleSweep(): void {

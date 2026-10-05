@@ -2,10 +2,10 @@ import type { ExtensionStatusJSON, Platform } from "@lib/types"
 
 export const extensionStatusJSON_bug: ExtensionStatusJSON = {
     "status": 400,
-    "message": `<strong>MeetingTranscript encountered a new error</strong> <br /> Please report it <a href="https://github.com/numandev/MeetingTranscript/issues" target="_blank">here</a>.`
+    "message": `<strong>MeetingTranscriptToObsidian encountered a new error</strong> <br /> Please report it <a href="https://github.com/numandev/MeetingTranscript/issues" target="_blank">here</a>.`
 }
 
-export const reportErrorMessage = "There is a bug in MeetingTranscript. Please report it at https://github.com/numandev/MeetingTranscript/issues"
+export const reportErrorMessage = "There is a bug in MeetingTranscriptToObsidian. Please report it at https://github.com/numandev/MeetingTranscript/issues"
 
 export const mutationConfig: MutationObserverInit = { childList: true, attributes: true, subtree: true, characterData: true }
 
@@ -34,12 +34,12 @@ export const commonCSS = `background: rgb(255 255 255 / 100%);
 
 export const NOTIFICATION_PLATFORM_CONFIGS: Record<Platform, { notificationText: string }> = {
     "google_meet": {
-        notificationText: "<strong>MeetingTranscript is running</strong> <br /> Do not turn off captions"
+        notificationText: "<strong>MeetingTranscriptToObsidian is running</strong> <br /> Do not turn off captions"
     },
     "teams": {
-        notificationText: "<b>MeetingTranscript is ready, enabling captions...</b> <br /> Please enable manually if not successful (More > Captions)"
+        notificationText: "<b>MeetingTranscriptToObsidian is ready, enabling captions...</b> <br /> Please enable manually if not successful (More > Captions)"
     },
     "zoom": {
-        notificationText: "MeetingTranscript is ready <br /> <b>Please switch on Zoom captions to begin (More > Captions)</b>"
+        notificationText: "MeetingTranscriptToObsidian is ready <br /> <b>Please switch on Zoom captions to begin (More > Captions)</b>"
     }
 }

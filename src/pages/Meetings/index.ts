@@ -769,7 +769,7 @@ function setupObsidianSettings(): void {
             chrome.storage.sync.set({ obsidianEnabled: true }, function () { })
         }).catch((error) => {
             enabledToggle.checked = false
-            alert("MeetingTranscript needs permission to talk to Obsidian on this machine.")
+            alert("MeetingTranscriptToObsidian needs permission to talk to Obsidian on this machine.")
             console.error("Obsidian permission error:", error)
         })
     })
@@ -817,7 +817,7 @@ function setupObsidianSettings(): void {
                 alert("Obsidian address saved!")
             })
         }).catch((error) => {
-            alert("MeetingTranscript needs permission to talk to Obsidian at that address.")
+            alert("MeetingTranscriptToObsidian needs permission to talk to Obsidian at that address.")
             console.error("Obsidian permission error:", error)
         })
     })
@@ -973,7 +973,7 @@ function setupAutoSummarize(): void {
             })
             .catch(() => {
                 toggle.checked = false
-                alert("MeetingTranscript needs access to chatgpt.com to summarise meetings.")
+                alert("MeetingTranscriptToObsidian needs access to chatgpt.com to summarise meetings.")
             })
     })
 }
@@ -1249,7 +1249,7 @@ function loadMeetings(): void {
                                     }
                                 })
                             }).catch(() => {
-                                alert("MeetingTranscript needs access to chatgpt.com to summarise meetings.")
+                                alert("MeetingTranscriptToObsidian needs access to chatgpt.com to summarise meetings.")
                             })
                         })
                     }

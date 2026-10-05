@@ -1,4 +1,4 @@
-# MeetingTranscript
+# MeetingTranscriptToObsidian
 
 Private meeting transcripts for Google Meet, Microsoft Teams and Zoom. Everything is captured and stored on your own machine.
 

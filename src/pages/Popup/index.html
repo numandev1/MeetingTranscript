@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>MeetingTranscript</title>
+  <title>MeetingTranscriptToObsidian</title>
   <link rel="stylesheet" href="styles/app.css">
   <style>
     body {
@@ -34,8 +34,12 @@
       font-size: var(--text-xs);
     }
 
+    /* The name is one long word; let it break before "ToObsidian" rather than push the button out */
+    .popup-header > div { flex: 1; min-width: 0; }
+
     .popup-header .btn {
       margin-left: auto;
+      flex-shrink: 0;
       text-decoration: none;
     }
 
@@ -143,7 +147,7 @@
   <header class="popup-header">
     <img src="./icon.png" alt="">
     <div>
-      <h1>MeetingTranscript</h1>
+      <h1>MeetingTranscript<wbr>ToObsidian</h1>
       <p class="sub-text">Transcripts kept on your device</p>
     </div>
     <!-- Up here so the most used action never needs a scroll -->

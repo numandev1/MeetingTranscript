@@ -62,7 +62,7 @@ export function createContentScriptState(meetingSoftware: MeetingSoftware, platf
         hasMeetingEnded: false,
         extensionStatusJSON: {
             status: 200,
-            message: "<strong>MeetingTranscript is running</strong> <br /> Do not turn off captions"
+            message: "<strong>MeetingTranscriptToObsidian is running</strong> <br /> Do not turn off captions"
         }
     }
 }
@@ -406,13 +406,13 @@ export function renderFab(state: ContentScriptState): void {
     const html = document.querySelector("html")
     const fab = document.createElement("button")
     fab.id = "meetingtranscript-fab"
-    fab.ariaLabel = "MeetingTranscript"
-    fab.title = "MeetingTranscript"
+    fab.ariaLabel = "MeetingTranscriptToObsidian"
+    fab.title = "MeetingTranscriptToObsidian"
     fab.style.cssText = fabCss
 
     fab.innerHTML = `
         <div id="fab-main-content" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">
-            <img id="fab-default-logo" src="${LOGO_URL}" alt="MeetingTranscript" draggable="false" style="width: 20px; height: 20px; object-fit: contain;" />
+            <img id="fab-default-logo" src="${LOGO_URL}" alt="MeetingTranscriptToObsidian" draggable="false" style="width: 20px; height: 20px; object-fit: contain;" />
             <span id="fab-letter-mark" style="display: none; color: #ffffff; font-weight: bold; font-size: 16px; text-transform: uppercase; font-family: sans-serif;"></span>
         </div>
 
@@ -561,7 +561,7 @@ const MAX_RECENT_ERRORS = 20
  */
 export function logError(state: ContentScriptState, code: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`[MeetingTranscript] error ${code} on ${state.meetingSoftware || "unknown platform"}:`, err)
+    console.error(`[MeetingTranscriptToObsidian] error ${code} on ${state.meetingSoftware || "unknown platform"}:`, err)
 
     chrome.storage.local.get(["recentErrors"], function (resultUntyped) {
         const result = resultUntyped as Partial<ResultLocal>
