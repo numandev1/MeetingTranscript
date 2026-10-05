@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-MeetingTranscript is a Manifest V3 Chrome extension that scrapes live captions/chat out of Google Meet, Microsoft Teams and Zoom web clients, stores transcripts locally, and downloads them (and optionally POSTs them to a user-configured webhook) when a meeting ends.
+MeetingTranscriptToObsidian is a Manifest V3 Chrome extension that scrapes live captions/chat out of Google Meet, Microsoft Teams and Zoom web clients, stores transcripts locally, and downloads them (and optionally POSTs them to a user-configured webhook) when a meeting ends.
 
 The source is TypeScript under `src/`, bundled by webpack into `build/`. **`build/` is the directory Chrome loads** — never edit it, it is wiped on every compile.
 
@@ -13,7 +13,7 @@ npm install
 npm run build      # one-off development build into build/
 npm start          # same, in watch mode
 npm run check      # tsc --noEmit, the only type gate
-npm run zip        # production (minified) build + zip/meetingtranscript-<version>.zip for the Web Store
+npm run zip        # production (minified) build + zip/meetingtranscripttoobsidian-<version>.zip for the Web Store
 ```
 
 - **Load it:** `chrome://extensions` → Developer mode → "Load unpacked" → select `build/`.

@@ -1,4 +1,4 @@
-// Watch-mode build. A webpack-dev-server is deliberately not used: MeetingTranscript's
+// Watch-mode build. A webpack-dev-server is deliberately not used: MeetingTranscriptToObsidian's
 // content scripts run on meet.google.com / teams.microsoft.com / zoom.us, whose CSP
 // blocks scripts and websockets from localhost. Watching and writing to build/ keeps
 // the "edit, reload the extension, refresh the meeting tab" loop working everywhere.

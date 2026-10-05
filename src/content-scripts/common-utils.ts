@@ -405,7 +405,7 @@ export function renderFab(state: ContentScriptState): void {
 
     const html = document.querySelector("html")
     const fab = document.createElement("button")
-    fab.id = "meetingtranscript-fab"
+    fab.id = "meetingtranscripttoobsidian-fab"
     fab.ariaLabel = "MeetingTranscriptToObsidian"
     fab.title = "MeetingTranscriptToObsidian"
     fab.style.cssText = fabCss
@@ -512,7 +512,7 @@ function makeVerticallyDraggable(fab: HTMLButtonElement): void {
 
 /** Updates the FAB visual state based on the current transcript data. */
 export function updateFabState(state: ContentScriptState): void {
-    const fab = document.querySelector("#meetingtranscript-fab")
+    const fab = document.querySelector("#meetingtranscripttoobsidian-fab")
 
     const defaultLogo = fab?.querySelector<HTMLElement>("#fab-default-logo")
     const letterMark = fab?.querySelector<HTMLElement>("#fab-letter-mark")
@@ -542,7 +542,7 @@ export function updateFabState(state: ContentScriptState): void {
 }
 
 export function unmountFab(): void {
-    const fab = document.querySelector("#meetingtranscript-fab")
+    const fab = document.querySelector("#meetingtranscripttoobsidian-fab")
     if (fab) {
         fab.remove()
     }

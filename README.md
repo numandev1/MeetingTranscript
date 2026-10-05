@@ -23,7 +23,7 @@ Private meeting transcripts for Google Meet, Microsoft Teams and Zoom. Everythin
 
 Grab a build from the releases page — no build step needed:
 
-- **[Latest build](../../releases/tag/latest)** — `meetingtranscript-latest.zip`, rebuilt on every push to `main`
+- **[Latest build](../../releases/tag/latest)** — `meetingtranscripttoobsidian-latest.zip`, rebuilt on every push to `main`
 - **[Tagged releases](../../releases)** — fixed versions
 
 Then:

@@ -74,7 +74,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: meetingtranscript-${{ steps.build.outputs.version }}
+          name: meetingtranscripttoobsidian-${{ steps.build.outputs.version }}
           path: ${{ steps.build.outputs.zip }}
           if-no-files-found: error
           retention-days: 30
@@ -102,7 +102,7 @@ jobs:
 
           # A second copy under a fixed name, so the download link stays valid
           # when the version is bumped.
-          cp "$ZIP" "zip/meetingtranscript-latest.zip"
+          cp "$ZIP" "zip/meetingtranscripttoobsidian-latest.zip"
 
           # Built line by line so every line of the workflow stays indented inside
           # this block while the notes file itself has no leading whitespace.
@@ -111,7 +111,7 @@ jobs:
             "" \
             "**Install**" \
             "" \
-            "1. Download \`meetingtranscript-latest.zip\` below and unzip it." \
+            "1. Download \`meetingtranscripttoobsidian-latest.zip\` below and unzip it." \
             "2. Open \`chrome://extensions\` and turn on **Developer mode**." \
             "3. Choose **Load unpacked** and select the unzipped folder." \
             "" \
@@ -122,7 +122,7 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
 
           gh release create latest \
-            "$ZIP" "zip/meetingtranscript-latest.zip" \
+            "$ZIP" "zip/meetingtranscripttoobsidian-latest.zip" \
             --prerelease \
             --target "${GITHUB_SHA}" \
             --title "Latest build (v${VERSION})" \
