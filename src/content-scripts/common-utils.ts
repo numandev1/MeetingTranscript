@@ -395,7 +395,7 @@ export function renderFab(state: ContentScriptState): void {
         display: flex;
         align-items: center;
         justify-content: center;
-        background-color: #071f29;
+        background-color: #4F46E5;
         box-shadow: 0px 0px 4px 0px #2A9ACA;
         cursor: pointer;
         border: none;
@@ -424,7 +424,7 @@ export function renderFab(state: ContentScriptState): void {
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            background-color: #071f29;
+            background-color: #4F46E5;
             box-shadow: 0 0 2px rgba(0,0,0,0.5);
             object-fit: contain;
             pointer-events: none;
