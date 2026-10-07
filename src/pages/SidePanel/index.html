@@ -64,6 +64,79 @@
             50% { opacity: 0.35; }
         }
 
+        /* --- Actions on the meeting in progress ------------------------------ */
+        .panel-actions {
+            display: flex;
+            gap: var(--space-2);
+            margin-top: var(--space-3);
+        }
+
+        .panel-actions[hidden] { display: none; }
+
+        .action-status {
+            margin-top: var(--space-2);
+            font-size: var(--text-sm);
+            color: var(--ink-subtle);
+            line-height: 1.5;
+        }
+
+        .action-status:empty { display: none; }
+        .action-status.is-error { color: var(--danger); }
+
+        /* --- Summary so far ---------------------------------------------------
+           Capped so the live transcript underneath always keeps most of the panel. */
+        #live-summary {
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            max-height: 45vh;
+            overflow-y: auto;
+        }
+
+        #live-summary[hidden] { display: none; }
+
+        #live-summary > summary {
+            position: sticky;
+            top: 0;
+            display: flex;
+            align-items: baseline;
+            gap: var(--space-2);
+            padding: var(--space-3) var(--space-4);
+            background: var(--surface);
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--ink);
+            list-style: none;
+        }
+
+        #live-summary > summary::-webkit-details-marker { display: none; }
+
+        #live-summary > summary::before {
+            content: "";
+            width: 0.4rem;
+            height: 0.4rem;
+            border-right: 1.5px solid var(--ink-subtle);
+            border-bottom: 1.5px solid var(--ink-subtle);
+            transform: translateY(-0.15rem) rotate(-45deg);
+            transition: transform var(--dur-fast) var(--ease);
+            align-self: center;
+        }
+
+        #live-summary[open] > summary::before { transform: translateY(-0.1rem) rotate(45deg); }
+
+        #live-summary-meta {
+            font-weight: 400;
+            font-size: var(--text-sm);
+            color: var(--ink-subtle);
+        }
+
+        .live-summary-body { padding: 0 var(--space-4) var(--space-3); }
+
+        .live-summary-actions {
+            display: flex;
+            gap: var(--space-2);
+            padding: 0 var(--space-4) var(--space-4);
+        }
+
         #transcript-container {
             flex: 1;
             overflow-y: auto;
@@ -120,7 +193,22 @@
             <span class="live-dot"></span>
             <span>Recording on this device</span>
         </div>
+        <!-- Only while a meeting is live: nothing here ends or files the meeting -->
+        <div class="panel-actions" id="panel-actions" hidden>
+            <button id="summarize-live" class="btn btn-primary btn-sm">Summarise so far</button>
+            <button id="download-live" class="btn btn-secondary btn-sm">Download transcript</button>
+        </div>
+        <p class="action-status" id="action-status" role="status" aria-live="polite"></p>
     </header>
+
+    <details id="live-summary" open hidden>
+        <summary>Summary <span id="live-summary-meta"></span></summary>
+        <div class="live-summary-body" id="live-summary-body"></div>
+        <div class="live-summary-actions">
+            <button id="download-live-summary" class="btn btn-secondary btn-sm">Download summary</button>
+            <button id="copy-live-summary" class="btn btn-secondary btn-sm">Copy</button>
+        </div>
+    </details>
 
     <div id="transcript-container"></div>
 </body>

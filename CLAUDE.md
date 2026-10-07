@@ -118,6 +118,12 @@ The setting is off until the user turns it on, and the toggle itself is the cons
 
 This is the most fragile part of the codebase: it depends on selectors in a page nobody here controls. They all live in `CHATGPT_SELECTORS` at the top of `summarizer.ts`, each listing the current markup alongside the previous one so a staged rollout works either way — that object is the first place to look when summaries stop working. The September 2026 redesign removed `#prompt-textarea`, the send/stop `data-testid`s and `data-message-author-role` in one go; a missing composer now reports 020 as "Could not send the prompt to ChatGPT — the message box was not found" rather than the permission message it used to borrow.
 
+### Summaries during a meeting
+
+The side panel can summarise or download the meeting **while it is still running**. `readLiveMeeting()` builds a `Meeting` from the in-progress storage keys (including the utterance being spoken) without writing anything, so the meeting is still filed normally when it ends. The live summary is kept as `liveSummary` in local storage, tagged with its meeting's start time — a panel showing a different meeting ignores it — and files are named "transcript so far" / "summary so far" so they are never mistaken for the final ones.
+
+ChatGPT runs go through one queue (`runChatGptSummary`). A summary asked for mid-meeting can still be running when the meeting ends and the automatic summary starts; two at once would fight over focus. The stored-meeting path writes its result back by start timestamp rather than array index, since the list can change during a run that long.
+
 ### Importing transcript files
 
 `src/lib/transcript-import.ts` parses an exported `.txt` back into a `Meeting`, so files from another computer or from before a reinstall re-enter the normal pipeline (summarise, Obsidian, webhook).

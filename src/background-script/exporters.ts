@@ -1,4 +1,4 @@
-import type { ErrorObject, ResultLocal, ResultSync, WebhookBody } from "@lib/types"
+import type { ErrorObject, Meeting, ResultLocal, ResultSync, WebhookBody } from "@lib/types"
 import { getTranscriptString, getChatMessagesString } from "./utils"
 import { getFolderPrefix, DEFAULT_DOWNLOAD_SUBFOLDER } from "@lib/paths"
 import { TIMEFORMAT } from "./config"
@@ -45,8 +45,14 @@ export function registerDownloadFilenameGuard(): void {
     })
 }
 
-/** @throws error codes: 009, 010 */
-export function downloadTranscript(index: number, isWebhookEnabled?: boolean): Promise<string> {
+/**
+ * Downloads a stored meeting (by index) or a meeting passed in directly — the one still
+ * in progress. A live meeting's file says "so far", so it is never mistaken for the
+ * complete transcript that is saved when the meeting ends.
+ *
+ * @throws error codes: 009, 010
+ */
+export function downloadTranscript(index: number | Meeting, isWebhookEnabled?: boolean): Promise<string> {
     return new Promise((resolve, reject) => {
         chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
             const resultLocal = resultLocalUntyped as Partial<ResultLocal>
@@ -56,8 +62,9 @@ export function downloadTranscript(index: number, isWebhookEnabled?: boolean): P
                 // "" when the user cleared the field, meaning save straight into Downloads
                 const folderPrefix = getFolderPrefix(resultSync.downloadSubfolder, DEFAULT_DOWNLOAD_SUBFOLDER)
 
-                if (resultLocal.meetings && resultLocal.meetings[index]) {
-                    const meeting = resultLocal.meetings[index]
+                const isLive = typeof index !== "number"
+                const meeting = isLive ? index : resultLocal.meetings?.[index]
+                if (meeting) {
 
                     // Sanitise meeting title to prevent invalid file name errors
                     // https://stackoverflow.com/a/78675894
@@ -74,7 +81,8 @@ export function downloadTranscript(index: number, isWebhookEnabled?: boolean): P
                     const timestamp = new Date(meeting.meetingStartTimestamp)
                     const formattedTimestamp = timestamp.toLocaleString("default", TIMEFORMAT).replace(/[\/:]/g, "-")
 
-                    const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} transcript` : "Transcript"
+                    const kind = isLive ? "transcript so far" : "transcript"
+                    const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} ${kind}` : (isLive ? "Transcript so far" : "Transcript")
 
                     const fileName = `${folderPrefix}${prefix}-${sanitisedMeetingTitle} at ${formattedTimestamp} on.txt`
 
@@ -223,7 +231,7 @@ export function postTranscriptToWebhook(index: number): Promise<string> {
  *
  * @throws error codes: 009, 010, 022
  */
-export function downloadSummary(index: number): Promise<string> {
+export function downloadSummary(index: number | Meeting): Promise<string> {
     return new Promise((resolve, reject) => {
         chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
             const resultLocal = resultLocalUntyped as Partial<ResultLocal>
@@ -232,7 +240,8 @@ export function downloadSummary(index: number): Promise<string> {
                 const resultSync = resultSyncUntyped as Partial<ResultSync>
                 const folderPrefix = getFolderPrefix(resultSync.downloadSubfolder, DEFAULT_DOWNLOAD_SUBFOLDER)
 
-                const meeting = resultLocal.meetings?.[index]
+                const isLive = typeof index !== "number"
+                const meeting = isLive ? index : resultLocal.meetings?.[index]
                 if (!meeting) {
                     reject({ errorCode: "010", errorMessage: "Meeting at specified index not found" } satisfies ErrorObject)
                     return
@@ -256,7 +265,8 @@ export function downloadSummary(index: number): Promise<string> {
                 const formattedTimestamp = new Date(meeting.meetingStartTimestamp)
                     .toLocaleString("default", TIMEFORMAT).replace(/[\/:]/g, "-")
 
-                const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} summary` : "Summary"
+                const kind = isLive ? "summary so far" : "summary"
+                const prefix = meeting.meetingSoftware ? `${meeting.meetingSoftware} ${kind}` : (isLive ? "Summary so far" : "Summary")
                 const fileName = `${folderPrefix}${prefix}-${sanitisedMeetingTitle} at ${formattedTimestamp}.txt`
 
                 let content = `${meeting.meetingTitle || meeting.title || "Meeting"}\n`

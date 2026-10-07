@@ -155,6 +155,9 @@ export type ExtensionMessageType =
   | "open_side_panel"
   | "broadcast_live_buffer"
   | "meet_embedded_chat_messages"
+  | "summarize_live_meeting"
+  | "download_live_transcript"
+  | "download_live_summary"
 
 /** Message sent by the calling script. */
 export interface ExtensionMessage {
@@ -233,6 +236,22 @@ export interface ResultLocal {
    * credential never leaves the device, matching the extension's privacy promise.
    */
   obsidianApiKey: string | undefined
+  /**
+   * Summary of the meeting still in progress, made from the transcript so far. Belongs
+   * to the meeting whose start timestamp it carries; a different meeting ignores it.
+   */
+  liveSummary: LiveSummary | null | undefined
+}
+
+/** A summary taken part-way through a meeting. */
+export interface LiveSummary {
+  /** Start timestamp of the meeting it belongs to. */
+  meetingStartTimestamp: string
+  summary: string
+  /** ISO timestamp of when it was made. */
+  createdAt: string
+  /** How many transcript blocks it covers, so the panel can say how far it got. */
+  blockCount: number
 }
 
 /** Shape of chrome.storage.sync. */
@@ -322,3 +341,4 @@ export interface ResultSync {
 // |         | also "Could not send the prompt to ChatGPT — <reason>" when the tab opened but the composer or send button was not usable |
 // | **021** | "ChatGPT did not return a summary in time" |
 // | **022** | "Nothing to summarise for this meeting" |
+// | **023** | "No meeting is in progress" |

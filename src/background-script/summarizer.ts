@@ -1,4 +1,5 @@
-import type { ErrorObject, Meeting, ResultLocal, ResultSync } from "@lib/types"
+import type { ErrorObject, LiveSummary, Meeting, ResultLocal, ResultSync } from "@lib/types"
+import { readLiveMeeting } from "./meetings"
 import { getTranscriptString } from "./utils"
 import { downloadSummary } from "./exporters"
 import { postSummaryToObsidian } from "./obsidian"
@@ -454,81 +455,147 @@ export function summarizeMeeting(index: number): Promise<string> {
                 return
             }
 
-            const meeting = meetings[index]
-            if (meeting.transcript.length === 0) {
-                reject({ errorCode: "022", errorMessage: "Nothing to summarise for this meeting" } satisfies ErrorObject)
-                return
-            }
-
-            let tab: ChatGptTab | undefined
             try {
-                const instructions = await new Promise<string | undefined>(resolve =>
-                    chrome.storage.sync.get(["summaryPrompt"], (r) =>
-                        resolve((r as Partial<ResultSync>).summaryPrompt)))
+                const summary = await runChatGptSummary(meetings[index])
 
-                tab = await openChatGptTab()
-                const submitted = await submitPrompt(tab.tabId, buildSummaryPrompt(meeting, instructions))
-
-                if (submitted === "no-composer") {
-                    // Signed out and a changed page both look like "no composer"; the
-                    // page says which, and a changed page is what to fix in CHATGPT_SELECTORS.
-                    const reason = await describeFailure(tab.tabId)
-                    throw notSubmittedError(reason === "you are signed out of ChatGPT"
-                        ? reason
-                        : "the message box was not found (ChatGPT's page may have changed)") satisfies ErrorObject
-                }
-                if (submitted === "not-inserted") {
-                    throw notSubmittedError("the transcript could not be typed into the message box") satisfies ErrorObject
-                }
-                if (submitted === "no-send-button") {
-                    throw notSubmittedError("the send button was not found or stayed disabled") satisfies ErrorObject
-                }
-
-                const openedTab = tab
-                const answer = await readResponse(openedTab.tabId, () => { restoreFocus(openedTab) })
-
-                if (!answer.complete) {
-                    // A partial answer is reported, never stored. Storing one is how a
-                    // summary that stopped mid-word came to be filed as successful.
-                    const reason = answer.reason ?? await describeFailure(openedTab.tabId)
-                    const got = answer.text
-                        ? ` (${answer.text.length} characters arrived before it stopped)`
-                        : ` (${await describeFailure(openedTab.tabId)})`
-                    throw { errorCode: "021", errorMessage: `ChatGPT did not finish the summary \u2014 ${reason}${got}` } satisfies ErrorObject
-                }
-
-                const summary = answer.text
-                if (!summary) {
-                    const reason = await describeFailure(openedTab.tabId)
-                    throw { errorCode: "021", errorMessage: `ChatGPT did not return a summary \u2014 ${reason}` } satisfies ErrorObject
-                }
-
-                meetings[index].summary = summary
-                meetings[index].summaryStatus = "successful"
-                chrome.storage.local.set({ meetings: meetings }, function () {
-                    resolve(summary)
+                // Re-read: the run takes minutes, and the list may have changed meanwhile
+                // (a meeting ended and was filed). Write back to the same meeting by its
+                // start time rather than trusting a stale array and index.
+                await updateStoredMeeting(meetings[index].meetingStartTimestamp, meeting => {
+                    meeting.summary = summary
+                    meeting.summaryStatus = "successful"
                 })
+                resolve(summary)
             }
             catch (error) {
-                const parsedError = error as ErrorObject
-                meetings[index].summaryStatus = "failed"
-                chrome.storage.local.set({ meetings: meetings }, function () {
-                    reject(parsedError.errorCode
-                        ? parsedError
-                        : { errorCode: "021", errorMessage: String(error) } satisfies ErrorObject)
+                await updateStoredMeeting(meetings[index].meetingStartTimestamp, meeting => {
+                    meeting.summaryStatus = "failed"
                 })
-            }
-            finally {
-                // Always, on every path: the user gets their place back and the tab
-                // goes away. Anything else leaves a ChatGPT tab behind and the screen
-                // parked on someone else's page.
-                if (tab) {
-                    await restoreFocus(tab)
-                    chrome.tabs.remove(tab.tabId).catch(() => { })
-                }
+                reject(error)
             }
         })
     })
+}
+
+/** Applies a change to the stored meeting with this start time, if it is still there. */
+function updateStoredMeeting(meetingStartTimestamp: string, change: (meeting: Meeting) => void): Promise<void> {
+    return new Promise(resolve => {
+        chrome.storage.local.get(["meetings"], (resultUntyped) => {
+            const meetings = (resultUntyped as Partial<ResultLocal>).meetings ?? []
+            const meeting = meetings.find(m => m.meetingStartTimestamp === meetingStartTimestamp)
+            if (!meeting) {
+                resolve()
+                return
+            }
+            change(meeting)
+            chrome.storage.local.set({ meetings }, () => resolve())
+        })
+    })
+}
+
+/**
+ * Summarises the meeting still in progress from its transcript so far, and keeps the
+ * result as `liveSummary` so the side panel shows it — and still shows it if the panel
+ * is closed and reopened. The meeting itself is untouched and is filed as usual when it
+ * ends.
+ *
+ * @throws error codes: 020, 021, 022, 023
+ */
+export async function summarizeLiveMeeting(): Promise<LiveSummary> {
+    const meeting = await readLiveMeeting()
+    const summary = await runChatGptSummary(meeting)
+    const liveSummary: LiveSummary = {
+        meetingStartTimestamp: meeting.meetingStartTimestamp,
+        summary,
+        createdAt: new Date().toISOString(),
+        blockCount: meeting.transcript.length,
+    }
+    await new Promise<void>(resolve => chrome.storage.local.set({ liveSummary }, () => resolve()))
+    return liveSummary
+}
+
+/**
+ * ChatGPT runs one at a time. Each one brings a tab to the front, so two at once —
+ * a summary asked for mid-meeting still running as the meeting ends and the automatic
+ * one starts — would fight over focus and could each read the other's answer.
+ */
+let chatGptQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Sends a meeting's transcript to ChatGPT and returns the finished summary. Storage is
+ * the caller's business; this only drives the tab.
+ *
+ * @throws error codes: 020, 021, 022
+ */
+function runChatGptSummary(meeting: Meeting): Promise<string> {
+    const run = chatGptQueue.then(() => driveChatGpt(meeting))
+    chatGptQueue = run.catch(() => { })
+    return run
+}
+
+async function driveChatGpt(meeting: Meeting): Promise<string> {
+    if (meeting.transcript.length === 0) {
+        throw { errorCode: "022", errorMessage: "Nothing to summarise for this meeting" } satisfies ErrorObject
+    }
+
+    let tab: ChatGptTab | undefined
+    try {
+        const instructions = await new Promise<string | undefined>(resolve =>
+            chrome.storage.sync.get(["summaryPrompt"], (r) =>
+                resolve((r as Partial<ResultSync>).summaryPrompt)))
+
+        tab = await openChatGptTab()
+        const submitted = await submitPrompt(tab.tabId, buildSummaryPrompt(meeting, instructions))
+
+        if (submitted === "no-composer") {
+            // Signed out and a changed page both look like "no composer"; the
+            // page says which, and a changed page is what to fix in CHATGPT_SELECTORS.
+            const reason = await describeFailure(tab.tabId)
+            throw notSubmittedError(reason === "you are signed out of ChatGPT"
+                ? reason
+                : "the message box was not found (ChatGPT's page may have changed)") satisfies ErrorObject
+        }
+        if (submitted === "not-inserted") {
+            throw notSubmittedError("the transcript could not be typed into the message box") satisfies ErrorObject
+        }
+        if (submitted === "no-send-button") {
+            throw notSubmittedError("the send button was not found or stayed disabled") satisfies ErrorObject
+        }
+
+        const openedTab = tab
+        const answer = await readResponse(openedTab.tabId, () => { restoreFocus(openedTab) })
+
+        if (!answer.complete) {
+            // A partial answer is reported, never stored. Storing one is how a
+            // summary that stopped mid-word came to be filed as successful.
+            const reason = answer.reason ?? await describeFailure(openedTab.tabId)
+            const got = answer.text
+                ? ` (${answer.text.length} characters arrived before it stopped)`
+                : ` (${await describeFailure(openedTab.tabId)})`
+            throw { errorCode: "021", errorMessage: `ChatGPT did not finish the summary — ${reason}${got}` } satisfies ErrorObject
+        }
+
+        if (!answer.text) {
+            const reason = await describeFailure(openedTab.tabId)
+            throw { errorCode: "021", errorMessage: `ChatGPT did not return a summary — ${reason}` } satisfies ErrorObject
+        }
+        return answer.text
+    }
+    catch (error) {
+        const parsedError = error as ErrorObject
+        throw parsedError.errorCode
+            ? parsedError
+            : { errorCode: "021", errorMessage: String(error) } satisfies ErrorObject
+    }
+    finally {
+        // Always, on every path: the user gets their place back and the tab
+        // goes away. Anything else leaves a ChatGPT tab behind and the screen
+        // parked on someone else's page.
+        if (tab) {
+            await restoreFocus(tab)
+            chrome.tabs.remove(tab.tabId).catch(() => { })
+        }
+    }
 }
 
 /**

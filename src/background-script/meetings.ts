@@ -147,6 +147,55 @@ function mergeLiveTranscriptBlock(transcript: TranscriptBlock[], liveTranscriptB
 }
 
 /**
+ * The meeting still in progress, as it stands right now, built the same way a finished
+ * meeting is filed — including the utterance still being spoken — but left in place.
+ * Nothing is written: the meeting carries on and is filed normally when it ends.
+ *
+ * @throws error codes: 022, 023
+ */
+export function readLiveMeeting(): Promise<Meeting> {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get([
+            "meetingTabId",
+            "meetingSoftware",
+            "meetingTitle",
+            "meetingStartTimestamp",
+            "transcript",
+            "chatMessages",
+            "liveTranscriptBlock",
+            "accountEmail",
+        ], function (resultUntyped) {
+            const result = resultUntyped as Partial<ResultLocal>
+
+            // A tab id means a meeting is live; "processing" means it has just ended and
+            // is being filed, which the finished-meeting path owns.
+            if (typeof result.meetingTabId !== "number" || !result.meetingStartTimestamp) {
+                reject({ errorCode: "023", errorMessage: "No meeting is in progress" } satisfies ErrorObject)
+                return
+            }
+
+            const transcript = mergeLiveTranscriptBlock(result.transcript ?? [], result.liveTranscriptBlock)
+            if (transcript.length === 0) {
+                reject({ errorCode: "022", errorMessage: "Nothing to summarise for this meeting" } satisfies ErrorObject)
+                return
+            }
+
+            resolve({
+                meetingSoftware: result.meetingSoftware ? result.meetingSoftware : "",
+                accountEmail: result.accountEmail,
+                meetingTitle: result.meetingTitle,
+                meetingStartTimestamp: result.meetingStartTimestamp,
+                meetingEndTimestamp: new Date().toISOString(),
+                transcript: transcript,
+                chatMessages: result.chatMessages ?? [],
+                webhookPostStatus: "new",
+                obsidianPostStatus: "new",
+            })
+        })
+    })
+}
+
+/**
  * Process transcript and chat messages of the meeting that just ended from storage,
  * format them into strings, and save as a new entry in meetings (keeping last 10).
  * @throws error codes: 013, 014

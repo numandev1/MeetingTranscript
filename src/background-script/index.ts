@@ -1,9 +1,9 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, ResultLocal, ResultSync } from "@lib/types"
-import { processLastMeeting, recoverLastMeeting } from "./meetings"
+import { processLastMeeting, readLiveMeeting, recoverLastMeeting } from "./meetings"
 import { normaliseMeetingUrl } from "@lib/meeting-merge"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
-import { summarizeAndFileMeeting } from "./summarizer"
+import { summarizeAndFileMeeting, summarizeLiveMeeting } from "./summarizer"
 import {
     getPermissionStatus,
     requestPlatformPermission,
@@ -346,6 +346,54 @@ chrome.runtime.onMessage.addListener(function (messageUnTyped, sender, sendRespo
 
             const response: ExtensionResponse = { success: false, message: parsedError }
             sendResponse(response)
+        })
+    }
+
+    // --- The meeting still in progress -------------------------------------------
+    // Summarise or download the transcript so far without ending the meeting. Nothing
+    // here files anything: the meeting is filed as usual when it ends.
+
+    if (message.type === "summarize_live_meeting") {
+        summarizeLiveMeeting()
+            .then(liveSummary => sendResponse({ success: true, message: liveSummary.summary } satisfies ExtensionResponse))
+            .catch((error) => {
+                // Fails with error codes: 020, 021, 022, 023
+                console.error("Live summary failed:", error)
+                sendResponse({ success: false, message: error as ErrorObject } satisfies ExtensionResponse)
+            })
+    }
+
+    if (message.type === "download_live_transcript") {
+        readLiveMeeting()
+            .then(meeting => downloadTranscript(meeting))
+            .then(() => sendResponse({ success: true } satisfies ExtensionResponse))
+            .catch((error) => {
+                // Fails with error codes: 009, 022, 023
+                sendResponse({ success: false, message: error as ErrorObject } satisfies ExtensionResponse)
+            })
+    }
+
+    if (message.type === "download_live_summary") {
+        chrome.storage.local.get(["liveSummary", "meetingTitle", "meetingSoftware"], (resultUntyped) => {
+            const result = resultUntyped as Partial<ResultLocal>
+            const live = result.liveSummary
+            if (!live) {
+                sendResponse({ success: false, message: { errorCode: "022", errorMessage: "Nothing to summarise for this meeting" } } satisfies ExtensionResponse)
+                return
+            }
+            // Works after the meeting ends too: the summary carries its own start time
+            downloadSummary({
+                meetingSoftware: result.meetingSoftware ?? "",
+                meetingTitle: result.meetingTitle,
+                meetingStartTimestamp: live.meetingStartTimestamp,
+                meetingEndTimestamp: live.createdAt,
+                transcript: [],
+                chatMessages: [],
+                webhookPostStatus: "new",
+                summary: live.summary,
+            })
+                .then(() => sendResponse({ success: true } satisfies ExtensionResponse))
+                .catch(error => sendResponse({ success: false, message: error as ErrorObject } satisfies ExtensionResponse))
         })
     }
 
