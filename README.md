@@ -51,7 +51,7 @@ Both write a text file when the meeting ends. Turn individual platforms on or of
 
 Everything below is optional and off until you configure it. The extension makes no network requests of its own — it only talks to endpoints you enter.
 
-**Webhooks** — point it at any URL and each finished meeting is posted as JSON. Choose a pre-formatted body for no-code tools, or the raw structure for code. The meetings page documents both shapes.
+**Webhooks** — point it at any URL and each finished meeting is posted as JSON. Choose a pre-formatted body for no-code tools, or the raw structure for code. The meetings page documents both shapes. Step-by-step guides: [Google Docs](docs/google-docs-integration.md) · [n8n](docs/n8n-integration.md).
 
 **Obsidian** — writes each meeting as a markdown note through the [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) plugin, with frontmatter, participants and a link between a summary and its transcript. Notes are filed per Google account, so meetings from different accounts stay separate. Requires the plugin's non-encrypted (HTTP) server, because the HTTPS port uses a self-signed certificate that browser extensions cannot accept.
 
