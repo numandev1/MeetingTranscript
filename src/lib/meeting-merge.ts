@@ -1,12 +1,6 @@
 import type { ChatMessage, Meeting, TranscriptBlock } from "./types"
 
 /**
- * How long after one piece of a meeting ends that another piece of the same meeting
- * still counts as the user coming back, rather than as a new meeting.
- */
-export const REJOIN_WINDOW_MS = 10 * 60 * 1000
-
-/**
  * Below this many words a meeting is not summarised automatically. A reload or a
  * rejoin files the few seconds before it as a meeting of its own, and summarising
  * that opened ChatGPT in the middle of the call to produce a one-line summary.
@@ -18,8 +12,8 @@ export const MIN_WORDS_TO_AUTO_SUMMARIZE = 50
 const GENERIC_TITLES = ["", "google meet", "meet"]
 
 /**
- * The meeting's address, without the query string, so "?authuser=1" or "?pli=1" on a
- * rejoin does not make the same meeting look like a different one.
+ * Meet ignores account-selection queries on rejoin. Other platforms retain their
+ * complete address because query strings and fragments can identify the meeting.
  */
 export function normaliseMeetingUrl(url: string | undefined): string | undefined {
     if (!url) {
@@ -27,7 +21,9 @@ export function normaliseMeetingUrl(url: string | undefined): string | undefined
     }
     try {
         const parsed = new URL(url)
-        return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "")
+        return parsed.hostname === "meet.google.com"
+            ? `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "")
+            : parsed.href
     }
     catch {
         return undefined
@@ -38,28 +34,24 @@ export function normaliseMeetingUrl(url: string | undefined): string | undefined
  * Whether `next` is the same meeting as `previous`, resumed after the page reloaded or
  * the user left and rejoined.
  *
- * Google Meet only, because only Meet has an address that identifies one meeting: a
- * Teams or Zoom web client address can be shared by consecutive, unrelated meetings,
- * and merging those would be far worse than a meeting split in two.
+ * The same URL continues the saved transcript regardless of the time away.
  */
 export function isRejoinOf(previous: Meeting | undefined, next: Meeting): boolean {
     if (!previous) {
         return false
     }
-    if (previous.meetingSoftware !== "Google Meet" || next.meetingSoftware !== "Google Meet") {
+    if (!previous.meetingSoftware || previous.meetingSoftware !== next.meetingSoftware) {
         return false
     }
-    if (!previous.meetingUrl || previous.meetingUrl !== next.meetingUrl) {
+    const previousUrl = normaliseMeetingUrl(previous.meetingUrl)
+    if (!previousUrl || previousUrl !== normaliseMeetingUrl(next.meetingUrl)) {
         return false
     }
     if (previous.accountEmail && next.accountEmail && previous.accountEmail !== next.accountEmail) {
         return false
     }
 
-    const gap = new Date(next.meetingStartTimestamp).getTime() - new Date(previous.meetingEndTimestamp).getTime()
-    // A little negative slack: the earlier piece's end is stamped when it is filed,
-    // which can be a moment after the next piece started.
-    return Number.isFinite(gap) && gap >= -60 * 1000 && gap <= REJOIN_WINDOW_MS
+    return true
 }
 
 function normaliseText(text: string): string {
@@ -75,7 +67,10 @@ function normaliseText(text: string): string {
 function joinTranscripts(first: TranscriptBlock[], second: TranscriptBlock[]): TranscriptBlock[] {
     const last = first[first.length - 1]
     const next = second[0]
+    const gap = last && next ? Date.parse(next.timestamp) - Date.parse(last.timestamp) : NaN
     if (last && next
+        && Number.isFinite(gap) && gap >= 0 && gap <= 60_000
+        && normaliseText(last.transcriptText).length > 0
         && last.personName === next.personName
         && normaliseText(next.transcriptText).startsWith(normaliseText(last.transcriptText))) {
         return [...first.slice(0, -1), ...second]
@@ -116,6 +111,19 @@ export function mergeRejoin(previous: Meeting, next: Meeting): Meeting {
         summary: undefined,
         summaryStatus: undefined,
     }
+}
+
+/** Keep the continued meeting last so exports and retention use the updated entry. */
+export function appendOrMergeMeeting(meetings: Meeting[], next: Meeting): Meeting[] {
+    if (meetings.some(meeting => coversStartTimestamp(meeting, next.meetingStartTimestamp))) {
+        return meetings
+    }
+    for (let index = meetings.length - 1; index >= 0; index--) {
+        if (isRejoinOf(meetings[index], next)) {
+            return [...meetings.slice(0, index), ...meetings.slice(index + 1), mergeRejoin(meetings[index], next)]
+        }
+    }
+    return [...meetings, next]
 }
 
 /**

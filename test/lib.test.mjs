@@ -280,11 +280,10 @@ test("a reload of the same Meet call is a rejoin", () => {
   assert.equal(merge.isRejoinOf(first, second), true)
 })
 
-test("a different call, a late return, or another platform is not a rejoin", () => {
+test("different URLs, platforms and accounts stay separate", () => {
   const { first, second } = rejoinPieces()
   assert.equal(merge.isRejoinOf(first, { ...second, meetingUrl: "https://meet.google.com/xyz-abcd-efg" }), false)
-  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-23T07:40:00.000Z" }), false)
-  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Teams" }, { ...second, meetingSoftware: "Teams" }), false)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingSoftware: "Teams" }), false)
   assert.equal(merge.isRejoinOf({ ...first, meetingUrl: undefined }, second), false)
   assert.equal(merge.isRejoinOf({ ...first, accountEmail: "a@x.com" }, { ...second, accountEmail: "b@x.com" }), false)
   assert.equal(merge.isRejoinOf(undefined, second), false)
@@ -354,4 +353,38 @@ test("summary markdown never turns text into markup", () => {
   const [block] = summaryMarkdown.parseSummaryMarkdown("<img src=x onerror=alert(1)> **unclosed")
   assert.equal(block.kind, "paragraph")
   assert.deepEqual(block.runs, [{ text: "<img src=x onerror=alert(1)> **unclosed", bold: false }])
+})
+
+
+test("the same meeting URL continues after a long absence and query changes", () => {
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-24T07:40:00.000Z", meetingUrl: second.meetingUrl + "?authuser=1" }), true)
+})
+
+test("rejoining an earlier meeting concatenates it and makes it the latest export", () => {
+  const { first, second } = rejoinPieces()
+  const other = { ...first, meetingUrl: "https://meet.google.com/xyz-abcd-efg", meetingStartTimestamp: "2026-09-23T07:30:00.000Z" }
+  const meetings = merge.appendOrMergeMeeting([first, other], second)
+  assert.equal(meetings.length, 2)
+  assert.equal(meetings[0], other)
+  assert.equal(meetings[1].meetingStartTimestamp, first.meetingStartTimestamp)
+  assert.equal(meetings[1].transcript.length, 2)
+  assert.equal(merge.coversStartTimestamp(meetings[1], second.meetingStartTimestamp), true)
+  assert.deepEqual(merge.appendOrMergeMeeting(meetings, second), meetings)
+})
+
+test("non-Meet addresses preserve meeting IDs in the query", () => {
+  const a = "https://teams.live.com/meet?meetingId=111"
+  const b = "https://teams.live.com/meet?meetingId=222"
+  assert.notEqual(merge.normaliseMeetingUrl(a), merge.normaliseMeetingUrl(b))
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Microsoft Teams", meetingUrl: a }, { ...second, meetingSoftware: "Microsoft Teams", meetingUrl: a }), true)
+  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Microsoft Teams", meetingUrl: a }, { ...second, meetingSoftware: "Microsoft Teams", meetingUrl: b }), false)
+})
+
+
+test("a repeated sentence after a long absence is kept in both transcript segments", () => {
+  const { first, second } = rejoinPieces()
+  const next = { ...second, transcript: first.transcript.map(block => ({ ...block, timestamp: "2026-09-23T08:00:00.000Z" })) }
+  assert.equal(merge.mergeRejoin(first, next).transcript.length, 2)
 })

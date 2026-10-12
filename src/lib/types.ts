@@ -86,8 +86,8 @@ export interface Meeting {
   summary?: string
   summaryStatus?: "new" | "failed" | "successful"
   /**
-   * Address of the meeting without its query string. Identifies a Google Meet meeting,
-   * so a reload or rejoin can be merged back into it instead of filed separately.
+   * Address identifying the meeting, with account-selection queries removed for Meet.
+   * A reload or rejoin of this address extends the saved transcript.
    */
   meetingUrl?: string
   /**

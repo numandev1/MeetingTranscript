@@ -1,7 +1,7 @@
 import type { ErrorObject, Meeting, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
 import { DEFAULT_MEETINGS_TO_KEEP } from "@lib/paths"
 import { trimMeetings } from "@lib/retention"
-import { coversStartTimestamp, hasEnoughToSummarize, isRejoinOf, mergeRejoin } from "@lib/meeting-merge"
+import { appendOrMergeMeeting, coversStartTimestamp, hasEnoughToSummarize } from "@lib/meeting-merge"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
 import { postTranscriptToObsidian } from "./obsidian"
 import { summarizeAndFileMeeting } from "./summarizer"
@@ -240,19 +240,7 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
                         const resultLocal = resultLocalUntyped as Partial<ResultLocal>
                         chrome.storage.sync.get(["meetingsToKeep"], function (resultSyncUntyped) {
                         const resultSync = resultSyncUntyped as Partial<ResultSync>
-                        let meetings = resultLocal.meetings || []
-
-                        // A reload or rejoin of the same Meet call continues the meeting
-                        // it interrupted. Filed separately, one call became two meetings:
-                        // a few seconds with a one-line summary, and the rest.
-                        const previous = meetings[meetings.length - 1]
-                        if (isRejoinOf(previous, newMeetingEntry)) {
-                            console.log("Rejoined the same meeting, merging into the previous entry")
-                            meetings[meetings.length - 1] = mergeRejoin(previous, newMeetingEntry)
-                        }
-                        else {
-                            meetings.push(newMeetingEntry)
-                        }
+                        let meetings = appendOrMergeMeeting(resultLocal.meetings ?? [], newMeetingEntry)
 
                         // Trim to the configured limit. trimMeetings has no access to the
                         // vault, downloads or the webhook, so this can only ever drop the
@@ -289,13 +277,10 @@ export function recoverLastMeeting(): Promise<string> {
             const resultLocal = resultLocalUntyped as Partial<ResultLocal>
             // Check if user ever attended a meeting
             if (resultLocal.meetingStartTimestamp) {
-                let lastSavedMeeting: Meeting | undefined
-                if ((resultLocal.meetings) && (resultLocal.meetings.length > 0)) {
-                    lastSavedMeeting = resultLocal.meetings[resultLocal.meetings.length - 1]
-                }
-
-                // Last meeting was not processed for some reason. Need to recover that data, process and download it.
-                if (!coversStartTimestamp(lastSavedMeeting, resultLocal.meetingStartTimestamp)) {
+                // A resumed meeting can have been moved within the saved list.
+                const alreadySaved = (resultLocal.meetings ?? []).some(meeting =>
+                    coversStartTimestamp(meeting, resultLocal.meetingStartTimestamp!))
+                if (!alreadySaved) {
                     processLastMeeting().then(() => {
                         resolve("Recovered last meeting to the best possible extent")
                     }).catch((error) => {
