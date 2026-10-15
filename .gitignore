@@ -5,3 +5,4 @@ extension.zip
 /extension/_metadata
 .DS_Store
 .test-build
+*.zip
