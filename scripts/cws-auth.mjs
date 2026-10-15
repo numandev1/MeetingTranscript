@@ -50,7 +50,10 @@ async function startCallbackServer(state) {
         const error = url.searchParams.get("error") ?? (url.searchParams.get("state") === state ? null : "state mismatch")
         response.writeHead(error ? 400 : 200, { "Content-Type": "text/plain" })
         response.end(error ? `Sign-in failed: ${error}` : "Chrome Web Store access granted. You can close this tab.")
+        // close() alone waits for the browser's keep-alive connection, which kept the
+        // script running after it had finished
         server.close()
+        server.closeAllConnections()
         error ? settle.reject(new Error(`Sign-in failed: ${error}`)) : settle.resolve(url.searchParams.get("code"))
     })
     await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", resolve).on("error", reject))
@@ -117,6 +120,7 @@ async function main() {
     execFileSync("gh", ["variable", "set", "CWS_EXTENSION_ID", "--repo", repo, "--body", extensionId], { stdio: ["ignore", "ignore", "inherit"] })
     console.log(`Stored CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN and CWS_EXTENSION_ID on ${repo}.`)
     console.log("Every new version merged to main will now be submitted to the Chrome Web Store.")
+    process.exit(0)
 }
 
 main().catch(error => {
