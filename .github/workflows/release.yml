@@ -1,26 +1,33 @@
 name: Build and release
 
+# Releasing is automatic: every push to main that changes what ships in the
+# extension bumps the patch version, commits that bump, tags, publishes a GitHub
+# release and submits it to the Chrome Web Store. See
+# docs/chrome-web-store-publishing.md.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
     inputs:
+      release:
+        description: "Cut a new version now, even if nothing in the extension changed"
+        type: boolean
+        default: false
       submit_to_store:
-        description: "Submit the current version to the Chrome Web Store (e.g. to retry after a review cleared)"
+        description: "Resubmit the current version to the Chrome Web Store (e.g. after a review cleared)"
         type: boolean
         default: false
 
-# Needed to create releases and upload assets. Nothing else is granted.
+# Needed to push the version bump, create releases and upload assets.
 permissions:
   contents: write
 
 concurrency:
-  # A newer push makes an in-flight build obsolete, so drop it rather than racing
-  # two jobs to publish to the same rolling release.
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  # Pull request builds are disposable. A release run is not: cancelling it between
+  # the bump commit and the store upload would leave a version half shipped.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -30,6 +37,9 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: the next version is derived from the last v* tag
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -46,6 +56,32 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # --- Version: bump the patch when something that ships changed ---------
+      - name: Prepare release
+        id: prep
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release))
+        run: |
+          set -euo pipefail
+          node scripts/prepare-release.mjs ${{ inputs.release && '--force' || '' }}
+
+      - name: Commit version bump
+        id: bump
+        if: steps.prep.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.prep.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src/manifest.json CHANGELOG.md
+          # The version may already be committed when a run that bumped it was
+          # interrupted; the release then goes out from HEAD as it is.
+          if ! git diff --cached --quiet; then
+            # GITHUB_TOKEN pushes never trigger workflows; [skip ci] says so for readers
+            git commit -m "chore(release): v$VERSION [skip ci]"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build production zip
         run: npm run zip
@@ -76,20 +112,6 @@ jobs:
           echo "zip verified: $ZIP (v$VERSION_IN_ZIP)"
 
       # Always available, including on pull requests where no release is cut
-      - name: Extract release notes from CHANGELOG.md
-        # Every version must say what changed before it can ship, so a bump without a
-        # changelog section fails here, on the pull request, rather than at release.
-        id: notes
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.build.outputs.version }}"
-          awk -v v="## $VERSION" '$0==v{found=1;next} found&&/^## /{exit} found{print}' CHANGELOG.md > release-notes.md
-          if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "::error file=CHANGELOG.md::No '## $VERSION' section in CHANGELOG.md. Add one describing this version."
-            exit 1
-          fi
-          cat release-notes.md
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -98,37 +120,29 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # --- Versioned release: cut automatically when the version changes ----
-      # Bumping the version in package.json and src/manifest.json and merging to main
-      # is the whole release. A version that already has a release is left alone, so
-      # ordinary pushes only refresh the rolling build below. Pushing a v* tag by hand
-      # still works and goes through the same step.
+      # --- Versioned release ------------------------------------------------
       - name: Publish versioned release
         id: release
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: steps.prep.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.build.outputs.version }}"
           TAG="v$VERSION"
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$TAG" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $VERSION"
-            exit 1
-          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, nothing to publish"
             echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh release create "$TAG" "${{ steps.build.outputs.zip }}" \
-            --target "$GITHUB_SHA" \
+            --target "${{ steps.bump.outputs.sha }}" \
             --title "$TAG" \
             --notes-file release-notes.md
           echo "created=true" >> "$GITHUB_OUTPUT"
 
       # --- Chrome Web Store: upload and submit for review -------------------
-      # Every newly cut version is submitted, and "Run workflow" with submit_to_store
+      # Every newly cut version is submitted; "Run workflow" with submit_to_store
       # resubmits the current one. Credentials are created once with `npm run
       # cws:auth`; until then the script warns and exits 2, which does not fail the
       # release that has already been published above.
@@ -153,6 +167,7 @@ jobs:
           set -euo pipefail
           ZIP="${{ steps.build.outputs.zip }}"
           VERSION="${{ steps.build.outputs.version }}"
+          TARGET="${{ steps.bump.outputs.sha || github.sha }}"
 
           # A second copy under a fixed name, so the download link stays valid
           # when the version is bumped.
@@ -161,7 +176,7 @@ jobs:
           # Built line by line so every line of the workflow stays indented inside
           # this block while the notes file itself has no leading whitespace.
           printf '%s\n' \
-            "Automatic build of \`main\` at \`${GITHUB_SHA:0:7}\`." \
+            "Automatic build of \`main\` at \`${TARGET:0:7}\`." \
             "" \
             "**Install**" \
             "" \
@@ -178,6 +193,6 @@ jobs:
           gh release create latest \
             "$ZIP" "zip/meetingtranscripttoobsidian-latest.zip" \
             --prerelease \
-            --target "${GITHUB_SHA}" \
+            --target "${{ steps.bump.outputs.sha || github.sha }}" \
             --title "Latest build (v${VERSION})" \
             --notes-file /tmp/release-notes.md
