@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.3
+
+- ci: bump the patch version automatically on every release
+- ci: submit every release to the Chrome Web Store
+
 ## 0.0.2
 
 - Leaving and rejoining the same Google Meet code (e.g. `suy-prih-sfq`) on the same day appends to its saved transcript, even after another meeting in between.
