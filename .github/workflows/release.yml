@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      submit_to_store:
+        description: "Submit the current version to the Chrome Web Store (e.g. to retry after a review cleared)"
+        type: boolean
+        default: false
 
 # Needed to create releases and upload assets. Nothing else is granted.
 permissions:
@@ -123,38 +128,21 @@ jobs:
           echo "created=true" >> "$GITHUB_OUTPUT"
 
       # --- Chrome Web Store: upload and submit for review -------------------
-      # Runs only for a newly cut version, and only once the store credentials exist
-      # as repository secrets (CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN)
-      # and the item id as the variable CWS_EXTENSION_ID. Without them it is skipped.
-      - name: Publish to Chrome Web Store
-        if: steps.release.outputs.created == 'true' && vars.CWS_EXTENSION_ID != ''
+      # Every newly cut version is submitted, and "Run workflow" with submit_to_store
+      # resubmits the current one. Credentials are created once with `npm run
+      # cws:auth`; until then the script warns and exits 2, which does not fail the
+      # release that has already been published above.
+      - name: Submit to Chrome Web Store
+        if: steps.release.outputs.created == 'true' || (github.event_name == 'workflow_dispatch' && inputs.submit_to_store)
         env:
           CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
           CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
           CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
           CWS_EXTENSION_ID: ${{ vars.CWS_EXTENSION_ID }}
         run: |
-          set -euo pipefail
-          if [ -z "$CWS_CLIENT_ID" ] || [ -z "$CWS_CLIENT_SECRET" ] || [ -z "$CWS_REFRESH_TOKEN" ]; then
-            echo "::warning::CWS_EXTENSION_ID is set but the CWS_* secrets are not; skipping the store upload"
-            exit 0
-          fi
-          ACCESS_TOKEN=$(curl -fsS https://oauth2.googleapis.com/token \
-            -d client_id="$CWS_CLIENT_ID" -d client_secret="$CWS_CLIENT_SECRET" \
-            -d refresh_token="$CWS_REFRESH_TOKEN" -d grant_type=refresh_token \
-            | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token")
-          echo "::add-mask::$ACCESS_TOKEN"
-
-          UPLOAD=$(curl -sS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H "x-goog-api-version: 2" \
-            -T "${{ steps.build.outputs.zip }}" \
-            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_EXTENSION_ID")
-          echo "$UPLOAD"
-          echo "$UPLOAD" | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8')); if (r.uploadState !== 'SUCCESS') { console.error('::error::Store upload failed: ' + JSON.stringify(r.itemError || r)); process.exit(1) }"
-
-          PUBLISH=$(curl -sS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H "x-goog-api-version: 2" -H "Content-Length: 0" \
-            "https://www.googleapis.com/chromewebstore/v1.1/items/$CWS_EXTENSION_ID/publish")
-          echo "$PUBLISH"
-          echo "$PUBLISH" | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8')); const s=r.status||[]; if (!s.includes('OK') && !s.includes('ITEM_PENDING_REVIEW')) { console.error('::error::Store publish failed: ' + JSON.stringify(r)); process.exit(1) }"
+          status=0
+          node scripts/cws-publish.mjs "${{ steps.build.outputs.zip }}" || status=$?
+          [ "$status" -eq 0 ] || [ "$status" -eq 2 ] || exit "$status"
 
       # --- Rolling build from main: always one fresh, downloadable zip ------
       - name: Publish rolling build
