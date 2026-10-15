@@ -1,5 +1,5 @@
 import type { ErrorObject, ExtensionMessage, ExtensionResponse, Platform, ResultLocal, ResultSync } from "@lib/types"
-import { processLastMeeting, readLiveMeeting, recoverLastMeeting } from "./meetings"
+import { processLastMeeting, readLiveMeeting, recoverLastMeeting, repairInvalidMerges } from "./meetings"
 import { normaliseMeetingUrl } from "@lib/meeting-merge"
 import { downloadTranscript, downloadSummary, postTranscriptToWebhook, registerDownloadFilenameGuard } from "./exporters"
 import { postTranscriptToObsidian, postSummaryToObsidian, syncAllMeetingsToObsidian } from "./obsidian"
@@ -474,6 +474,9 @@ chrome.permissions.onAdded.addListener(() => {
 
 
 chrome.runtime.onInstalled.addListener(() => {
+    // Undo merges of separate meetings at one address made before rejoins were bounded
+    repairInvalidMerges().then(result => console.log(result))
+
     // Set defaults values
     chrome.storage.sync.get(null, function (resultSyncUntyped) {
         const resultSync = resultSyncUntyped as Partial<ResultSync>

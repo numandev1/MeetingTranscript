@@ -2,6 +2,7 @@
 
 ## 0.0.2
 
-- Rejoining the same meeting URL appends to its saved transcript, even after ten minutes or after another meeting.
+- Leaving and rejoining the same Google Meet code (e.g. `suy-prih-sfq`) on the same day appends to its saved transcript, even after another meeting in between.
+- A recurring meeting that keeps one address is no longer merged across days. Meetings already merged that way are split back into one per occurrence on update, and filed to Obsidian.
 - Keep meeting IDs in Teams and Zoom URLs when matching transcript segments.
 - Replace the supply chain demo in store screenshots with a product rollout meeting.

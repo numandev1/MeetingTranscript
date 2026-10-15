@@ -356,14 +356,36 @@ test("summary markdown never turns text into markup", () => {
 })
 
 
-test("the same meeting URL continues after a long absence and query changes", () => {
+test("a late return, another platform or a different event title is not a rejoin", () => {
   const { first, second } = rejoinPieces()
-  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-24T07:40:00.000Z", meetingUrl: second.meetingUrl + "?authuser=1" }), true)
+  // The next day's occurrence of a recurring meeting keeps the same address
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-24T07:17:00.000Z" }), false)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: "2026-09-25T07:17:00.000Z" }), false)
+  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Teams" }, { ...second, meetingSoftware: "Teams" }), false)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingTitle: "Meet - Sprint Planning" }), false)
 })
 
-test("rejoining an earlier meeting concatenates it and makes it the latest export", () => {
+test("leaving and rejoining the same meeting code later that day continues the meeting", () => {
+  const local = (h, m) => new Date(2026, 8, 23, h, m).toISOString()
   const { first, second } = rejoinPieces()
-  const other = { ...first, meetingUrl: "https://meet.google.com/xyz-abcd-efg", meetingStartTimestamp: "2026-09-23T07:30:00.000Z" }
+  const morning = { ...first, meetingStartTimestamp: local(9, 0), meetingEndTimestamp: local(9, 30) }
+  // Four hours away, same day, same code
+  assert.equal(merge.isRejoinOf(morning, { ...second, meetingStartTimestamp: local(13, 30), meetingUrl: "https://meet.google.com/abc-defg-hij?authuser=2" }), true)
+  // A call past midnight is still the same meeting within the window
+  const late = { ...first, meetingStartTimestamp: local(23, 0), meetingEndTimestamp: local(23, 50) }
+  assert.equal(merge.isRejoinOf(late, { ...second, meetingStartTimestamp: new Date(2026, 8, 24, 0, 20).toISOString() }), true)
+})
+
+test("a rejoin within the window survives query changes, code-only titles and a long break", () => {
+  const { first, second } = rejoinPieces()
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingUrl: second.meetingUrl + "?authuser=1" }), true)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingTitle: "Meet - abc-defg-hij" }), true)
+  assert.equal(merge.isRejoinOf(first, { ...second, meetingStartTimestamp: new Date(Date.parse(first.meetingEndTimestamp) + 90 * 60 * 1000).toISOString() }), true)
+})
+
+test("rejoining after another meeting concatenates it and makes it the latest export", () => {
+  const { first, second } = rejoinPieces()
+  const other = { ...first, meetingUrl: "https://meet.google.com/xyz-abcd-efg", meetingStartTimestamp: "2026-09-23T07:17:20.000Z" }
   const meetings = merge.appendOrMergeMeeting([first, other], second)
   assert.equal(meetings.length, 2)
   assert.equal(meetings[0], other)
@@ -373,15 +395,64 @@ test("rejoining an earlier meeting concatenates it and makes it the latest expor
   assert.deepEqual(merge.appendOrMergeMeeting(meetings, second), meetings)
 })
 
+test("each day of a recurring meeting is filed as its own meeting", () => {
+  const { first } = rejoinPieces()
+  const nextDay = { ...first, meetingStartTimestamp: "2026-09-24T07:17:00.000Z", meetingEndTimestamp: "2026-09-24T07:40:00.000Z",
+    transcript: [{ personName: "Ahmad", timestamp: "2026-09-24T07:18:00.000Z", transcriptText: "New day." }] }
+  assert.equal(merge.appendOrMergeMeeting([first], nextDay).length, 2)
+})
+
 test("non-Meet addresses preserve meeting IDs in the query", () => {
   const a = "https://teams.live.com/meet?meetingId=111"
   const b = "https://teams.live.com/meet?meetingId=222"
   assert.notEqual(merge.normaliseMeetingUrl(a), merge.normaliseMeetingUrl(b))
-  const { first, second } = rejoinPieces()
-  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Microsoft Teams", meetingUrl: a }, { ...second, meetingSoftware: "Microsoft Teams", meetingUrl: a }), true)
-  assert.equal(merge.isRejoinOf({ ...first, meetingSoftware: "Microsoft Teams", meetingUrl: a }, { ...second, meetingSoftware: "Microsoft Teams", meetingUrl: b }), false)
 })
 
+test("a meeting merged across days is split back into one meeting per occurrence", () => {
+  const url = "https://meet.google.com/suy-prih-sfq"
+  const block = (timestamp, text) => ({ personName: "Ahmad", timestamp, transcriptText: text })
+  const merged = {
+    meetingSoftware: "Google Meet", meetingTitle: "Meet - Supply Chain Standup", meetingUrl: url, accountEmail: "a@x.com",
+    meetingStartTimestamp: "2026-10-12T07:20:13.268Z", meetingEndTimestamp: "2026-10-14T08:30:15.610Z",
+    mergedStartTimestamps: ["2026-10-12T07:27:33.709Z", "2026-10-13T07:28:03.978Z", "2026-10-13T07:36:44.262Z", "2026-10-14T07:23:03.294Z"],
+    transcript: [
+      block("2026-10-12T07:21:00.000Z", "Monday before the reload."),
+      block("2026-10-12T07:30:00.000Z", "Monday after the reload."),
+      block("2026-10-13T07:29:00.000Z", "Tuesday."),
+      block("2026-10-13T07:40:00.000Z", "Tuesday after a rejoin."),
+      block("2026-10-14T07:25:00.000Z", "Wednesday."),
+    ],
+    chatMessages: [{ personName: "Ahmad", timestamp: "2026-10-13T07:30:00.000Z", chatMessageText: "link" }],
+    webhookPostStatus: "new", obsidianPostStatus: "successful", summary: "All three days.", summaryStatus: "successful",
+  }
+  const untouched = { ...merged, meetingUrl: "https://meet.google.com/xyz-abcd-efg", mergedStartTimestamps: undefined }
+  const result = merge.splitInvalidMerges([untouched, merged])
+  assert.equal(result.length, 4)
+  assert.equal(result[0], untouched)
+  const [monday, tuesday, wednesday] = result.slice(1)
+  // The first day keeps its start time, and so its note, with only its own content
+  assert.equal(monday.meetingStartTimestamp, merged.meetingStartTimestamp)
+  assert.deepEqual(monday.mergedStartTimestamps, ["2026-10-12T07:27:33.709Z"])
+  assert.equal(monday.transcript.length, 2)
+  assert.equal(monday.meetingEndTimestamp, "2026-10-12T07:30:00.000Z")
+  // A genuine rejoin inside the merged entry stays joined
+  assert.equal(tuesday.meetingStartTimestamp, "2026-10-13T07:28:03.978Z")
+  assert.equal(tuesday.transcript.length, 2)
+  assert.equal(tuesday.chatMessages.length, 1)
+  assert.equal(wednesday.meetingEndTimestamp, merged.meetingEndTimestamp)
+  for (const meeting of [monday, tuesday, wednesday]) {
+    assert.equal(meeting.obsidianPostStatus, "new")
+    assert.equal(meeting.summary, undefined)
+  }
+  // Recovery still recognises every piece as saved
+  for (const start of [merged.meetingStartTimestamp, ...merged.mergedStartTimestamps]) {
+    assert.equal(result.some(meeting => merge.coversStartTimestamp(meeting, start)), true)
+  }
+  // Running it again changes nothing
+  const again = merge.splitInvalidMerges(result)
+  assert.equal(again.length, 4)
+  again.forEach((meeting, index) => assert.equal(meeting, result[index]))
+})
 
 test("a repeated sentence after a long absence is kept in both transcript segments", () => {
   const { first, second } = rejoinPieces()

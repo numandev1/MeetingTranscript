@@ -1,7 +1,7 @@
 import type { ErrorObject, Meeting, ResultLocal, ResultSync, TranscriptBlock } from "@lib/types"
 import { DEFAULT_MEETINGS_TO_KEEP } from "@lib/paths"
 import { trimMeetings } from "@lib/retention"
-import { appendOrMergeMeeting, coversStartTimestamp, hasEnoughToSummarize } from "@lib/meeting-merge"
+import { appendOrMergeMeeting, coversStartTimestamp, hasEnoughToSummarize, splitInvalidMerges } from "@lib/meeting-merge"
 import { downloadTranscript, postTranscriptToWebhook } from "./exporters"
 import { postTranscriptToObsidian } from "./obsidian"
 import { summarizeAndFileMeeting } from "./summarizer"
@@ -266,6 +266,53 @@ export function pickupLastMeetingFromStorage(): Promise<string> {
             else {
                 reject({ errorCode: "013", errorMessage: "No meetings found. May be attend one?" } satisfies ErrorObject)
             }
+        })
+    })
+}
+
+/**
+ * Splits saved meetings that hold several separate meetings — what an unbounded rejoin
+ * rule produced for a recurring meeting that keeps one address — and files the
+ * resulting meetings to Obsidian when it is set up.
+ *
+ * Filing is sequential and stops at the first failure, as the bulk sync does: an
+ * unreachable vault fails for every note. Anything not filed stays marked failed or new
+ * in the meetings list, where its Obsidian button retries it.
+ */
+export function repairInvalidMerges(): Promise<string> {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(["meetings"], function (resultLocalUntyped) {
+            const resultLocal = resultLocalUntyped as Partial<ResultLocal>
+            const meetings = resultLocal.meetings ?? []
+            const repaired = splitInvalidMerges(meetings)
+            if (repaired.length === meetings.length) {
+                resolve("No merged meetings needed splitting")
+                return
+            }
+            const kept = new Set(meetings)
+            const toFile = repaired
+                .map((meeting, index) => kept.has(meeting) ? -1 : index)
+                .filter(index => index >= 0)
+
+            chrome.storage.local.set({ meetings: repaired }, function () {
+                console.log(`Split ${repaired.length - meetings.length} meeting(s) out of merged entries`)
+                chrome.storage.sync.get(["obsidianEnabled"], function (resultSyncUntyped) {
+                    const resultSync = resultSyncUntyped as Partial<ResultSync>
+                    if (!resultSync.obsidianEnabled) {
+                        resolve("Split merged meetings")
+                        return
+                    }
+                    toFile.reduce<Promise<void>>(
+                        (previous, index) => previous.then(() => postTranscriptToObsidian(index).then(() => undefined)),
+                        Promise.resolve()
+                    ).then(() => {
+                        resolve("Split merged meetings and filed them to Obsidian")
+                    }).catch((error) => {
+                        console.error("Filing split meetings to Obsidian stopped:", error)
+                        resolve("Split merged meetings; some were not filed to Obsidian")
+                    })
+                })
+            })
         })
     })
 }
