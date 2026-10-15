@@ -20,7 +20,7 @@ npm run zip        # production (minified) build + zip/meetingtranscripttoobsidi
 - **After editing:** the reload button on the extension card picks up background/UI changes; content-script changes also need a refresh of the meeting tab. Content scripts are *dynamically registered*, so toggling the platform off/on from the popup may be needed too (see below).
 - There is no test suite and no linter.
 - `npm start` runs a watching webpack, not a dev server. webpack-dev-server is deliberately not used: content scripts run on meet.google.com / teams.microsoft.com / zoom.us, whose CSP blocks scripts and websockets from localhost.
-- **Release flow:** bump `version` in both `package.json` and `src/manifest.json`, update the "Extension status: 🟢 OPERATIONAL (vX.Y.Z)" line in `README.md`, work on a `vX.Y.Z` branch, merge to `main` via PR.
+- **Release flow:** on a `vX.Y.Z` branch, bump `version` in both `package.json` and `src/manifest.json` and add a `## X.Y.Z` section to `CHANGELOG.md`, then merge to `main`. CI (`.github/workflows/release.yml`) does the rest: on `main`, a version with no GitHub release yet is tagged `vX.Y.Z` and released with that changelog section as its notes, and, when the `CWS_*` secrets and `CWS_EXTENSION_ID` variable are set, uploaded to the Chrome Web Store and submitted for review. Every push to `main` also refreshes the rolling `latest` pre-release. Pull requests fail if the two versions differ or the changelog section is missing.
 
 ## Build wiring
 
